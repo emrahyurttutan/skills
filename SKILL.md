@@ -1,0 +1,1558 @@
+---
+name: emrah-skills
+description: Expo React Native mobile app development with expo-iap in-app purchases, AdMob ads, i18n localization, ATT tracking transparency, optional OIDC authentication, onboarding flow, paywall, and NativeTabs navigation
+---
+
+# Expo Mobile Application Development Guide
+
+> **IMPORTANT**: This is a SKILL file, NOT a project. NEVER run npm/bun install in this folder. NEVER create code files here. When creating a new project, ALWAYS ask the user for the project path first or create it in a separate directory (e.g., `~/Projects/app-name`).
+
+This guide is created to provide context when working with Expo projects using Claude Code.
+
+## MANDATORY REQUIREMENTS
+
+When creating a new Expo project, you MUST include ALL of the following:
+
+### Required Screens (ALWAYS CREATE)
+
+- [ ] `src/app/att-permission.tsx` - App Tracking Transparency permission screen (**iOS only**, shown BEFORE onboarding)
+- [ ] `src/app/onboarding.tsx` - Swipe-based onboarding with fullscreen background video and gradient overlay
+- [ ] `src/app/paywall.tsx` - expo-iap paywall screen (shown after onboarding)
+- [ ] `src/app/settings.tsx` - Settings screen with language, theme, notifications, and reset onboarding options
+
+### Onboarding Video Implementation (REQUIRED)
+
+The onboarding screen MUST have a fullscreen background video. Use a URL, not a local file:
+
+```tsx
+import { useVideoPlayer, VideoView } from "expo-video";
+
+const VIDEO_URL =
+  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+
+const player = useVideoPlayer(VIDEO_URL, (player) => {
+  player.loop = true;
+  player.muted = true;
+  player.play();
+});
+
+// In render:
+<VideoView
+  player={player}
+  style={StyleSheet.absoluteFill}
+  contentFit="cover"
+  nativeControls={false}
+/>;
+```
+
+Do NOT just import expo-video without actually using the VideoView component.
+
+### Required Navigation (ALWAYS USE)
+
+- [ ] Use `NativeTabs` from `expo-router/unstable-native-tabs` for tab navigation - NEVER use `@react-navigation/bottom-tabs` or `Tabs` from expo-router
+
+### Required Context Providers (ALWAYS WRAP)
+
+```tsx
+import { ThemeProvider } from "@/context/theme-context";
+import { PurchasesProvider } from "@/context/purchases-context";
+import {
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider as NavigationThemeProvider,
+} from "@react-navigation/native";
+
+<ThemeProvider>
+  <OnboardingProvider>
+    <PurchasesProvider>
+      <AdsProvider>
+        <NavigationThemeProvider
+          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+        >
+          <Stack />
+        </NavigationThemeProvider>
+      </AdsProvider>
+    </PurchasesProvider>
+  </OnboardingProvider>
+</ThemeProvider>;
+```
+
+### Required Libraries (ALWAYS INSTALL)
+
+Use `npx expo install` to install libraries (NOT npm/yarn/bun install):
+
+```bash
+npx expo install expo-iap expo-build-properties expo-tracking-transparency react-native-google-mobile-ads expo-notifications i18next react-i18next expo-localization react-native-reanimated expo-video expo-audio expo-sqlite expo-linear-gradient
+```
+
+Libraries:
+
+- `expo-iap` (In-App Purchases)
+- `expo-build-properties` (required by expo-iap)
+- `expo-tracking-transparency` (ATT — iOS App Tracking Transparency)
+- `react-native-google-mobile-ads` (AdMob)
+- `expo-notifications`
+- `i18next` + `react-i18next` + `expo-localization`
+- `react-native-reanimated`
+- `expo-video` + `expo-audio`
+- `expo-sqlite` (for localStorage)
+- `expo-linear-gradient` (for gradient overlays)
+
+### expo-iap Configuration (REQUIRED in app.json)
+
+You MUST add this to `app.json` for expo-iap to work (Expo SDK 53+):
+
+```json
+{
+  "expo": {
+    "plugins": [
+      "expo-iap",
+      ["expo-build-properties", { "android": { "kotlinVersion": "2.2.0" } }]
+    ]
+  }
+}
+```
+
+- Requires Expo SDK 53+ or React Native 0.79+
+- iOS 15+ (StoreKit 2), Android API 21+
+- Does NOT work in Expo Go — use custom dev client (`eas build --profile development`)
+
+### AdMob Configuration (REQUIRED in app.json)
+
+You MUST add this to `app.json` for AdMob to work:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy",
+          "iosAppId": "ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy"
+        }
+      ]
+    ]
+  }
+}
+```
+
+For development/testing, use test App IDs:
+
+- iOS: `ca-app-pub-3940256099942544~1458002511`
+- Android: `ca-app-pub-3940256099942544~3347511713`
+
+Do NOT skip this configuration or the app will crash with `GADInvalidInitializationException`.
+
+### Banner Ad Implementation (REQUIRED)
+
+You MUST implement banner ads in the Tab layout. Use this pattern:
+
+```tsx
+import { View, StyleSheet } from "react-native";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { useTranslation } from "react-i18next";
+import {
+  BannerAd,
+  BannerAdSize,
+  TestIds,
+} from "react-native-google-mobile-ads";
+import { useAds } from "@/context/ads-context";
+
+const adUnitId = __DEV__
+  ? TestIds.BANNER
+  : "ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy";
+
+export default function TabLayout() {
+  const { t } = useTranslation();
+  const { shouldShowAds } = useAds();
+
+  return (
+    <View style={styles.container}>
+      <NativeTabs>
+        <NativeTabs.Trigger name="index">
+          <NativeTabs.Trigger.Label>{t("tabs.home")}</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
+        </NativeTabs.Trigger>
+        <NativeTabs.Trigger name="settings">
+          <NativeTabs.Trigger.Label>
+            {t("tabs.settings")}
+          </NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Icon sf="gear" md="settings" />
+        </NativeTabs.Trigger>
+      </NativeTabs>
+
+      {shouldShowAds && (
+        <View style={styles.adContainer}>
+          <BannerAd
+            unitId={adUnitId}
+            size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+            requestOptions={{
+              requestNonPersonalizedAdsOnly: true,
+            }}
+          />
+        </View>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  adContainer: {
+    alignItems: "center",
+    paddingBottom: 10,
+  },
+});
+```
+
+- ALWAYS use `TestIds.BANNER` in development
+- Banner ad is placed below NativeTabs in the Tab layout
+- Use `useAds` context to check `shouldShowAds` (hides for premium users)
+
+### TURKISH LOCALIZATION (IMPORTANT)
+
+When writing `tr.json`, you MUST use correct Turkish characters:
+
+- ı (lowercase dotless i) - NOT i
+- İ (uppercase dotted I) - NOT I
+- ü, Ü, ö, Ö, ç, Ç, ş, Ş, ğ, Ğ
+
+Example:
+
+- ✅ "Ayarlar", "Giriş", "Çıkış", "Başla", "İleri", "Güncelle"
+- ❌ "Ayarlar", "Giris", "Cikis", "Basla", "Ileri", "Guncelle"
+
+### FORBIDDEN (NEVER USE)
+
+- ❌ AsyncStorage - Use `expo-sqlite/localStorage/install` instead
+- ❌ lineHeight style - Use padding/margin instead
+- ❌ `Tabs` from expo-router - Use `NativeTabs` instead
+- ❌ `@react-navigation/bottom-tabs` - Use `NativeTabs` instead
+- ❌ `expo-av` - Use `expo-video` for video, `expo-audio` for audio instead
+- ❌ `expo-ads-admob` - Use `react-native-google-mobile-ads` instead
+- ❌ Any other ads library - ONLY use `react-native-google-mobile-ads`
+- ❌ Reanimated hooks inside callbacks - Call at component top level
+
+### Reanimated Usage (IMPORTANT)
+
+NEVER call `useAnimatedStyle`, `useSharedValue`, or other reanimated hooks inside callbacks, loops, or conditions.
+
+❌ WRONG:
+
+```tsx
+const renderItem = () => {
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: 1 })); // ERROR!
+  return <Animated.View style={animatedStyle} />;
+};
+```
+
+✅ CORRECT:
+
+```tsx
+function MyComponent() {
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: 1 })); // Top level
+  return <Animated.View style={animatedStyle} />;
+}
+```
+
+For lists, create a separate component for each item:
+
+```tsx
+function AnimatedItem({ item }) {
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: 1 }));
+  return <Animated.View style={animatedStyle}>{item.name}</Animated.View>;
+}
+
+// In FlatList:
+renderItem={({ item }) => <AnimatedItem item={item} />}
+```
+
+### POST-CREATION CLEANUP (ALWAYS DO)
+
+After creating a new Expo project, you MUST:
+
+1. If using `(tabs)` folder, DELETE `src/app/index.tsx` to avoid route conflicts:
+
+```bash
+rm src/app/index.tsx
+```
+
+2. Check and remove `lineHeight` from these files:
+
+- `src/components/themed-text.tsx` (comes with lineHeight by default - REMOVE IT)
+- Any other component using `lineHeight`
+
+Search and remove all `lineHeight` occurrences:
+
+```bash
+grep -r "lineHeight" src/
+```
+
+Replace with padding or margin instead.
+
+### AFTER COMPLETING CODE (ALWAYS RUN)
+
+When you finish writing/modifying code, you MUST run these commands in order:
+
+```bash
+npx expo install --fix
+npx expo prebuild --clean
+```
+
+1. `install --fix` fixes dependency version mismatches
+2. `prebuild --clean` recreates ios and android folders
+
+Do NOT skip these steps.
+
+---
+
+## Project Creation
+
+When user asks to create an app, you MUST:
+
+1. FIRST ask for the bundle ID (e.g., "What is the bundle ID? Example: com.company.appname")
+2. **SECOND ask: "Does the app require user login/authentication (OIDC)?"**
+   - If **YES** → follow the [Authentication (OIDC)](#authentication-oidc--optional) section after project setup
+   - If **NO** → skip auth entirely
+3. Create the project in the CURRENT directory using:
+
+```bash
+bunx create-expo -t default@next app-name
+```
+
+3. Update `app.json` with the bundle ID:
+
+```json
+{
+  "expo": {
+    "ios": {
+      "bundleIdentifier": "com.company.appname"
+    },
+    "android": {
+      "package": "com.company.appname"
+    }
+  }
+}
+```
+
+4. Then cd into the project and start implementing all required screens
+5. Do NOT ask for project path - always use current directory
+
+## Technology Stack
+
+- **Framework**: Expo, React Native
+- **Navigation**: Expo Router (file-based routing), NativeTabs
+- **State Management**: React Context API
+- **Translations**: i18next, react-i18next
+- **Purchases**: expo-iap (expo-iap)
+- **Advertisements**: Google AdMob (react-native-google-mobile-ads)
+- **Notifications**: expo-notifications
+- **Animations**: react-native-reanimated
+- **Storage**: localStorage via expo-sqlite polyfill
+- **Authentication** _(optional)_: OIDC via expo-auth-session + expo-secure-store + zustand
+
+> **WARNING**: DO NOT USE AsyncStorage! Use expo-sqlite polyfill instead.
+
+- Example usage
+
+```js
+import "expo-sqlite/localStorage/install";
+
+globalThis.localStorage.setItem("key", "value");
+console.log(globalThis.localStorage.getItem("key")); // 'value'
+```
+
+> **WARNING**: NEVER USE `lineHeight`! It causes layout issues in React Native. Use padding or margin instead.
+
+## Project Structure
+
+```
+project-root/
+├── src/
+│   ├── app/
+│   │   ├── _layout.tsx
+│   │   ├── index.tsx
+│   │   ├── explore.tsx
+│   │   ├── settings.tsx
+│   │   ├── paywall.tsx
+│   │   ├── onboarding.tsx
+│   │   └── att-permission.tsx
+│   ├── components/
+│   │   ├── ui/
+│   │   ├── themed-text.tsx
+│   │   └── themed-view.tsx
+│   ├── constants/
+│   │   ├── theme.ts
+│   │   └── [data-files].ts
+│   ├── context/
+│   │   ├── onboarding-context.tsx
+│   │   ├── purchases-context.tsx
+│   │   └── ads-context.tsx
+│   ├── store/                        # (if auth enabled)
+│   │   ├── authStore.ts
+│   │   └── useIntegratedAuth.ts
+│   ├── hooks/
+│   │   ├── use-notifications.ts
+│   │   └── use-color-scheme.ts
+│   ├── lib/
+│   │   ├── notifications.ts
+│   │   ├── purchases.ts
+│   │   ├── ads.ts
+│   │   └── i18n.ts
+│   ├── services/                     # (if auth enabled)
+│   │   └── identity/
+│   │       ├── index.ts
+│   │       ├── types.ts
+│   │       └── hooks/
+│   └── locales/
+│       ├── tr.json
+│       └── en.json
+├── assets/
+│   └── images/
+├── ios/
+├── android/
+├── app.json
+├── eas.json
+├── package.json
+└── tsconfig.json
+```
+
+## Tab Navigation (NativeTabs)
+
+Expo Router uses NativeTabs for native tab navigation:
+
+```tsx
+import { NativeTabs } from "expo-router/unstable-native-tabs";
+
+export default function TabLayout() {
+  return (
+    <NativeTabs>
+      <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="explore">
+        <NativeTabs.Trigger.Label>Explore</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="compass.fill" md="explore" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="settings">
+        <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="gear" md="settings" />
+      </NativeTabs.Trigger>
+    </NativeTabs>
+  );
+}
+```
+
+### NativeTabs Properties
+
+- **sf**: SF Symbols icon name (iOS)
+- **md**: Material Design icon name (Android)
+- **name**: Route file name
+- Tab order follows trigger order
+
+### Common Icons
+
+| Purpose       | SF Symbol       | Material Icon |
+| ------------- | --------------- | ------------- |
+| Home          | house.fill      | home          |
+| Explore       | compass.fill    | explore       |
+| Settings      | gear            | settings      |
+| Profile       | person.fill     | person        |
+| Search        | magnifyingglass | search        |
+| Favorites     | heart.fill      | favorite      |
+| Notifications | bell.fill       | notifications |
+
+## Development Commands
+
+```bash
+bun install
+bun start
+bun ios
+bun android
+bun lint
+npx expo install --fix
+npx expo prebuild --clean
+```
+
+## EAS Build Commands
+
+```bash
+eas build --profile development --platform ios
+eas build --profile development --platform android
+eas build --profile production --platform ios
+eas build --profile production --platform android
+eas submit --platform ios
+eas submit --platform android
+```
+
+## Important Modules
+
+### expo-iap
+
+- File: `src/context/purchases-context.tsx`
+- Wraps `useIAP` hook and checks subscription status **on app startup**
+- Product SKUs: weekly (`weekly_premium`) and yearly (`yearly_premium`)
+- Paywall: `app/paywall.tsx`
+- Exposes `usePurchases()` → `{ isPremium, loading, refreshPremiumStatus }`
+- `refreshPremiumStatus()` must be called after a successful purchase
+- Use `getAvailablePurchases()` for restore purchases flow
+- Always call `finishTransaction` after a successful purchase
+
+#### PurchasesProvider Implementation (REQUIRED)
+
+Create `src/context/purchases-context.tsx`:
+
+```tsx
+import { createContext, useContext, useEffect, useState } from "react";
+import { useIAP } from "expo-iap";
+
+const SUBSCRIPTION_SKUS = ["weekly_premium", "yearly_premium"];
+
+interface PurchasesContextValue {
+  isPremium: boolean;
+  loading: boolean;
+  refreshPremiumStatus: () => Promise<void>;
+}
+
+const PurchasesContext = createContext<PurchasesContextValue>({
+  isPremium: false,
+  loading: true,
+  refreshPremiumStatus: async () => {},
+});
+
+export function PurchasesProvider({ children }: { children: React.ReactNode }) {
+  const { hasActiveSubscriptions } = useIAP();
+  const [isPremium, setIsPremium] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const refreshPremiumStatus = async () => {
+    try {
+      const hasPremium = await hasActiveSubscriptions(SUBSCRIPTION_SKUS);
+      setIsPremium(hasPremium);
+    } catch (error) {
+      console.error("Failed to check subscription status:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ App açıldığında otomatik olarak satın alma durumu kontrol edilir
+  useEffect(() => {
+    refreshPremiumStatus();
+  }, []);
+
+  return (
+    <PurchasesContext.Provider
+      value={{ isPremium, loading, refreshPremiumStatus }}
+    >
+      {children}
+    </PurchasesContext.Provider>
+  );
+}
+
+export function usePurchases() {
+  return useContext(PurchasesContext);
+}
+```
+
+After a successful purchase in `paywall.tsx`, always call `refreshPremiumStatus()`:
+
+```tsx
+const { refreshPremiumStatus } = usePurchases();
+
+// In onPurchaseSuccess callback:
+await finishTransaction({ purchase, isConsumable: false });
+await refreshPremiumStatus(); // Update global premium state
+router.replace("/(tabs)");
+```
+
+### AdMob
+
+- File: `src/lib/ads.ts`
+- Ads disabled for premium users
+- Test IDs must be used in development
+
+### ATT / Tracking Transparency (iOS Only)
+
+- File: `src/app/att-permission.tsx`
+- **iOS only** — skipped entirely on Android
+- Must be shown **before onboarding**, on first launch
+- Uses `requestTrackingPermissionsAsync` from `expo-tracking-transparency`
+- Required by Apple for AdMob personalized ads on iOS 14.5+
+- App will be **rejected by App Store** without this
+
+#### app.json Configuration (REQUIRED)
+
+```json
+{
+  "expo": {
+    "plugins": [
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "This identifier will be used to deliver personalized ads to you."
+        }
+      ]
+    ]
+  }
+}
+```
+
+#### ATT Screen Implementation (REQUIRED)
+
+Create `src/app/att-permission.tsx` — a full-screen custom UI that explains tracking **before** triggering the system dialog:
+
+```tsx
+import { useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Platform,
+  SafeAreaView,
+} from "react-native";
+import { router } from "expo-router";
+import { requestTrackingPermissionsAsync } from "expo-tracking-transparency";
+import { LinearGradient } from "expo-linear-gradient";
+import { useTranslation } from "react-i18next";
+import "expo-sqlite/localStorage/install";
+
+// Redirect Android away immediately (this screen is iOS only)
+export function unstable_settings() {
+  return {};
+}
+
+export default function ATTPermissionScreen() {
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    // Safety: if somehow opened on Android, redirect
+    if (Platform.OS !== "ios") {
+      router.replace("/onboarding");
+    }
+  }, []);
+
+  const handleAllow = async () => {
+    await requestTrackingPermissionsAsync(); // Triggers iOS system dialog
+    globalThis.localStorage.setItem("att_shown", "true");
+    router.replace("/onboarding");
+  };
+
+  const handleSkip = async () => {
+    globalThis.localStorage.setItem("att_shown", "true");
+    router.replace("/onboarding");
+  };
+
+  return (
+    <LinearGradient
+      colors={["#0F0F1A", "#1A1A2E", "#16213E"]}
+      style={styles.container}
+    >
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.content}>
+          {/* Icon */}
+          <View style={styles.iconContainer}>
+            <Text style={styles.icon}>🔒</Text>
+          </View>
+
+          {/* Title */}
+          <Text style={styles.title}>{t("att.title")}</Text>
+
+          {/* Description */}
+          <Text style={styles.description}>{t("att.description")}</Text>
+
+          {/* Benefits list */}
+          <View style={styles.benefitsList}>
+            <BenefitItem icon="🎯" text={t("att.benefit1")} />
+            <BenefitItem icon="🛡️" text={t("att.benefit2")} />
+            <BenefitItem icon="🚫" text={t("att.benefit3")} />
+          </View>
+
+          {/* Privacy note */}
+          <Text style={styles.privacyNote}>{t("att.privacyNote")}</Text>
+        </View>
+
+        {/* Buttons */}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={styles.allowButton} onPress={handleAllow}>
+            <Text style={styles.allowButtonText}>{t("att.allow")}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
+            <Text style={styles.skipButtonText}>{t("att.skip")}</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+}
+
+function BenefitItem({ icon, text }: { icon: string; text: string }) {
+  return (
+    <View style={styles.benefitItem}>
+      <Text style={styles.benefitIcon}>{icon}</Text>
+      <Text style={styles.benefitText}>{text}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  safeArea: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  content: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
+  },
+  iconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 32,
+  },
+  icon: {
+    fontSize: 48,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  description: {
+    fontSize: 16,
+    color: "rgba(255,255,255,0.75)",
+    textAlign: "center",
+    marginBottom: 32,
+    paddingVertical: 4,
+  },
+  benefitsList: {
+    width: "100%",
+    gap: 12,
+    marginBottom: 24,
+  },
+  benefitItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+  },
+  benefitIcon: {
+    fontSize: 22,
+  },
+  benefitText: {
+    flex: 1,
+    fontSize: 14,
+    color: "rgba(255,255,255,0.85)",
+  },
+  privacyNote: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.45)",
+    textAlign: "center",
+  },
+  buttonContainer: {
+    padding: 24,
+    gap: 12,
+  },
+  allowButton: {
+    backgroundColor: "#6C63FF",
+    borderRadius: 16,
+    padding: 18,
+    alignItems: "center",
+  },
+  allowButtonText: {
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  skipButton: {
+    alignItems: "center",
+    padding: 12,
+  },
+  skipButtonText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 15,
+  },
+});
+```
+
+#### ATT Localization Keys (add to tr.json and en.json)
+
+`en.json`:
+
+```json
+"att": {
+  "title": "Help Us Improve Your Experience",
+  "description": "We use your data to show you relevant ads and improve app performance. Your privacy is important to us.",
+  "benefit1": "See ads that are relevant to you",
+  "benefit2": "Your data is never sold to third parties",
+  "benefit3": "You can change this anytime in Settings",
+  "privacyNote": "Tapping \"Allow\" will show Apple's permission dialog.",
+  "allow": "Allow Tracking",
+  "skip": "No Thanks"
+}
+```
+
+`tr.json`:
+
+```json
+"att": {
+  "title": "Deneyiminizi Geliştirmemize Yardım Edin",
+  "description": "Verilerinizi size uygun reklamlar göstermek ve uygulama performansını artırmak için kullanıyoruz. Gizliliğiniz bizim için önemlidir.",
+  "benefit1": "Size ilgili reklamlar görün",
+  "benefit2": "Verileriniz asla üçüncü taraflara satılmaz",
+  "benefit3": "Bunu Ayarlar'dan istediğiniz zaman değiştirebilirsiniz",
+  "privacyNote": "\"İzin Ver\" tuşuna basınca Apple'ın izin diyaloğu görünecektir.",
+  "allow": "Takibe İzin Ver",
+  "skip": "Hayır, Teşekkürler"
+}
+```
+
+### Notifications
+
+- Files: `src/lib/notifications.ts`, `src/hooks/use-notifications.ts`
+- iOS requires push notification entitlement
+
+### App Flow (CRITICAL — ALWAYS FOLLOW THIS ORDER)
+
+```
+iOS:     ATT Permission → Onboarding → Paywall → Main App (tabs)
+Android:               Onboarding → Paywall → Main App (tabs)
+```
+
+- ATT screen is **iOS only** — Android skips it entirely
+- ATT screen shows once; result is stored in `localStorage` (`att_shown`)
+- After ATT (grant or deny), navigate to onboarding
+- After onboarding completes, navigate to paywall
+- After paywall (purchase or skip), navigate to main app
+
+```tsx
+// In att-permission.tsx - after permission result:
+const handleContinue = async () => {
+  await requestTrackingPermissionsAsync(); // request system dialog
+  globalThis.localStorage.setItem("att_shown", "true");
+  router.replace("/onboarding");
+};
+```
+
+```tsx
+// In onboarding.tsx - when user completes onboarding:
+const handleComplete = async () => {
+  await setOnboardingCompleted(true);
+  router.replace("/paywall"); // Navigate to paywall immediately
+};
+```
+
+```tsx
+// In paywall.tsx - after purchase or skip:
+const handleContinue = () => {
+  router.replace("/(tabs)"); // Navigate to main app
+};
+```
+
+#### \_layout.tsx Routing Logic (iOS ATT check)
+
+In the root `_layout.tsx`, determine the initial route on app start:
+
+```tsx
+import { Platform } from "react-native";
+import { useEffect } from "react";
+import { router } from "expo-router";
+import { useOnboarding } from "@/context/onboarding-context";
+import "expo-sqlite/localStorage/install";
+
+export default function RootLayout() {
+  const { hasCompletedOnboarding } = useOnboarding();
+
+  useEffect(() => {
+    if (hasCompletedOnboarding === null) return; // still loading
+
+    if (hasCompletedOnboarding) {
+      router.replace("/(tabs)");
+      return;
+    }
+
+    // Show ATT only on iOS and only once
+    const attShown = globalThis.localStorage.getItem("att_shown");
+    if (Platform.OS === "ios" && !attShown) {
+      router.replace("/att-permission");
+    } else {
+      router.replace("/onboarding");
+    }
+  }, [hasCompletedOnboarding]);
+
+  return <Stack screenOptions={{ headerShown: false }} />;
+}
+```
+
+### Paywall Subscription Options (REQUIRED)
+
+Paywall MUST have two subscription options:
+
+1. **Weekly** - Default option
+2. **Yearly** - With "50% OFF" badge (recommended, should be highlighted)
+
+```tsx
+// Subscription option component example:
+const subscriptionOptions = [
+  {
+    id: "weekly",
+    title: t("paywall.weekly"),
+    price: "$4.99/week",
+    selected: selectedPlan === "weekly",
+  },
+  {
+    id: "yearly",
+    title: t("paywall.yearly"),
+    price: "$129.99/year",
+    badge: "50% OFF",
+    selected: selectedPlan === "yearly",
+  },
+];
+
+// Yearly option should be visually highlighted as the best value
+```
+
+- Yearly option should show the discount badge prominently
+- Default selection can be weekly, but yearly should be visually recommended
+- Use expo-iap product SKU identifiers to match these options (e.g. `weekly_premium`, `yearly_premium`)
+
+### Settings Screen Options (REQUIRED)
+
+Settings screen MUST include:
+
+1. **Language** - Change app language
+2. **Theme** - Light/Dark/System
+3. **Notifications** - Enable/disable notifications
+4. **Remove Ads** - Navigate to paywall (hidden if already premium)
+5. **Reset Onboarding** - Restart onboarding flow (for testing/demo)
+
+```tsx
+import { usePurchases } from "@/context/purchases-context";
+
+const { isPremium } = usePurchases(); // Global premium state (checked on app startup)
+
+// Remove Ads - navigates to paywall
+const handleRemoveAds = () => {
+  router.push("/paywall");
+};
+
+// Reset onboarding
+const handleResetOnboarding = async () => {
+  await setOnboardingCompleted(false);
+  router.replace("/onboarding");
+};
+
+// In settings list:
+{
+  !isPremium && (
+    <SettingsItem
+      title={t("settings.removeAds")}
+      icon="crown.fill"
+      onPress={handleRemoveAds}
+    />
+  );
+}
+
+<SettingsItem
+  title={t("settings.resetOnboarding")}
+  icon="arrow.counterclockwise"
+  onPress={handleResetOnboarding}
+/>;
+```
+
+## Localization
+
+- File: `lib/i18n.ts`
+- Languages stored in `locales/`
+- App restarts on language change
+
+## Coding Standards
+
+- Use functional components
+- Strict TypeScript
+- Avoid hardcoded strings
+- Use padding instead of lineHeight
+- Use memoization when necessary
+
+## Context Providers
+
+```tsx
+<ThemeProvider>
+  <OnboardingProvider>
+    <PurchasesProvider>
+      {" "}
+      {/* ✅ App açılışında isPremium kontrol eder */}
+      <AdsProvider>
+        {" "}
+        {/* AdsProvider, isPremium'u PurchasesProvider'dan okur */}
+        <Stack />
+      </AdsProvider>
+    </PurchasesProvider>
+  </OnboardingProvider>
+</ThemeProvider>
+```
+
+## useColorScheme Hook
+
+File: `src/hooks/use-color-scheme.ts`
+
+```tsx
+import { useThemeContext } from "@/context/theme-context";
+
+export function useColorScheme(): "light" | "dark" | "unspecified" {
+  const { isDark } = useThemeContext();
+  return isDark ? "dark" : "light";
+}
+```
+
+## Important Notes
+
+1. iOS permissions are defined in `app.json`
+2. Android permissions are defined in `app.json`
+3. Enable new architecture via `newArchEnabled: true`
+4. Enable typed routes via `experiments.typedRoutes`
+
+## App Store & Play Store Notes
+
+- iOS ATT permission required
+- Restore purchases must work correctly
+- Target SDK must be up to date
+
+---
+
+## Authentication (OIDC — Optional)
+
+> **Only implement this section if the user answered YES to "Does the app need login/authentication?"**
+
+This project uses **OpenID Connect (OIDC)** with OAuth 2.0 Authorization Code Flow + PKCE.
+
+### Architecture
+
+```
+UI (useIntegratedAuth hook)
+        │
+        ├── authStore (Zustand) ── SecureStore (tokens)
+        │       │
+        │       └── Identity Server (OIDC)
+        │               ├── /authorize
+        │               ├── /token
+        │               └── /userinfo
+        │
+        └── services/identity/ ── Authenticated Axios instance
+```
+
+### Install Auth Libraries
+
+```bash
+npx expo install expo-auth-session expo-secure-store expo-web-browser
+bunx expo install zustand @tanstack/react-query
+```
+
+### Environment Variables (`.env`)
+
+```env
+EXPO_PUBLIC_IDENTITY_SERVER_AUTHORITY=https://identity.appaflytech.com
+EXPO_PUBLIC_OIDC_CLIENT_ID=wap-mobile-app
+EXPO_PUBLIC_APP_SCHEME=anatoli
+EXPO_PUBLIC_APP=anatoli
+```
+
+### `app.json` — Scheme (REQUIRED for redirect URI)
+
+```json
+{
+  "expo": {
+    "scheme": "anatoli"
+  }
+}
+```
+
+### `src/utils/constants.ts`
+
+```typescript
+export const AppConfig = {
+  identityServerAuthority:
+    process.env.EXPO_PUBLIC_IDENTITY_SERVER_AUTHORITY ||
+    "https://identity.appaflytech.com",
+  oidcClientId: process.env.EXPO_PUBLIC_OIDC_CLIENT_ID || "wap-mobile-app",
+  appScheme: process.env.EXPO_PUBLIC_APP_SCHEME || "anatoli",
+  app: process.env.EXPO_PUBLIC_APP || "anatoli",
+};
+```
+
+### `src/store/authStore.ts`
+
+```typescript
+import * as AuthSession from "expo-auth-session";
+import * as SecureStore from "expo-secure-store";
+import * as WebBrowser from "expo-web-browser";
+import { create } from "zustand";
+import { AppConfig } from "@/utils/constants";
+
+WebBrowser.maybeCompleteAuthSession();
+
+export const OIDC_CONFIG = {
+  issuer: AppConfig.identityServerAuthority,
+  clientId: AppConfig.oidcClientId,
+  scopes: ["openid", "profile", "offline_access"],
+};
+
+const STORAGE_KEY = "auth_tokens";
+const redirectUri = AuthSession.makeRedirectUri({
+  scheme: AppConfig.appScheme,
+});
+
+type TokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  id_token?: string;
+  token_type?: string;
+  issued_at?: number;
+};
+
+type UserModel = {
+  sub: string;
+  name?: string;
+  given_name?: string;
+  family_name?: string;
+  preferred_username?: string;
+  picture?: string;
+  email?: string;
+  email_verified?: boolean;
+};
+
+type AuthState = {
+  tokens: TokenResponse | null;
+  user: UserModel | null;
+  discovery: AuthSession.DiscoveryDocument | null;
+  ready: boolean;
+  isLoggingIn: boolean;
+
+  init: () => Promise<void>;
+  login: () => Promise<void>;
+  logout: () => Promise<void>;
+  refresh: () => Promise<TokenResponse>;
+  loadUserInfo: () => Promise<void>;
+  getValidAccessToken: () => Promise<string | null>;
+  isAuthenticated: () => boolean;
+};
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  tokens: null,
+  user: null,
+  discovery: null,
+  ready: false,
+  isLoggingIn: false,
+
+  init: async () => {
+    try {
+      // Load discovery document
+      const discovery = await AuthSession.fetchDiscoveryAsync(
+        OIDC_CONFIG.issuer,
+      );
+      set({ discovery });
+
+      // Restore saved tokens
+      const raw = await SecureStore.getItemAsync(STORAGE_KEY);
+      if (raw) {
+        const tokens: TokenResponse = JSON.parse(raw);
+        set({ tokens });
+        await get().loadUserInfo();
+      }
+    } catch (e) {
+      console.warn("Auth init error:", e);
+    } finally {
+      set({ ready: true });
+    }
+  },
+
+  login: async () => {
+    const { discovery } = get();
+    if (!discovery) throw new Error("Discovery not loaded");
+
+    set({ isLoggingIn: true });
+    try {
+      const request = new AuthSession.AuthRequest({
+        clientId: OIDC_CONFIG.clientId,
+        redirectUri,
+        scopes: OIDC_CONFIG.scopes,
+        responseType: AuthSession.ResponseType.Code,
+        usePKCE: true,
+      });
+
+      const authUrl = await request.makeAuthUrlAsync(discovery);
+      const authUrlFull = `${authUrl}&app=${AppConfig.app}&lang=tr`;
+
+      const result = await WebBrowser.openAuthSessionAsync(
+        authUrlFull,
+        redirectUri,
+        { preferEphemeralSession: true },
+      );
+
+      if (result.type !== "success") throw new Error("Login cancelled");
+
+      const code = new URL(result.url).searchParams.get("code");
+      if (!code) throw new Error("No code returned");
+
+      const tokenResult = await AuthSession.exchangeCodeAsync(
+        {
+          code,
+          clientId: OIDC_CONFIG.clientId,
+          redirectUri,
+          codeVerifier: request.codeVerifier!,
+        },
+        discovery,
+      );
+
+      const payload: TokenResponse = {
+        access_token: tokenResult.accessToken,
+        refresh_token: tokenResult.refreshToken ?? undefined,
+        expires_in: tokenResult.expiresIn ?? undefined,
+        id_token: tokenResult.idToken ?? undefined,
+        issued_at: Math.floor(Date.now() / 1000),
+      };
+
+      await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(payload));
+      set({ tokens: payload });
+      await get().loadUserInfo();
+    } finally {
+      set({ isLoggingIn: false });
+    }
+  },
+
+  logout: async () => {
+    const { tokens, discovery } = get();
+    try {
+      if (tokens?.id_token && discovery?.endSessionEndpoint) {
+        const logoutUrl = `${discovery.endSessionEndpoint}?id_token_hint=${tokens.id_token}&post_logout_redirect_uri=${encodeURIComponent(redirectUri)}`;
+        await WebBrowser.openAuthSessionAsync(logoutUrl, redirectUri, {
+          preferEphemeralSession: true,
+        });
+      }
+    } finally {
+      await SecureStore.deleteItemAsync(STORAGE_KEY);
+      set({ tokens: null, user: null });
+    }
+  },
+
+  refresh: async () => {
+    const { tokens, discovery } = get();
+    if (!tokens?.refresh_token || !discovery) throw new Error("Cannot refresh");
+
+    const result = await AuthSession.refreshAsync(
+      { clientId: OIDC_CONFIG.clientId, refreshToken: tokens.refresh_token },
+      discovery,
+    );
+
+    const payload: TokenResponse = {
+      access_token: result.accessToken,
+      refresh_token: result.refreshToken ?? tokens.refresh_token,
+      expires_in: result.expiresIn ?? undefined,
+      issued_at: Math.floor(Date.now() / 1000),
+    };
+
+    await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(payload));
+    set({ tokens: payload });
+    return payload;
+  },
+
+  loadUserInfo: async () => {
+    const { tokens, discovery } = get();
+    if (!tokens?.access_token || !discovery?.userInfoEndpoint) return;
+
+    const res = await fetch(discovery.userInfoEndpoint, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const user: UserModel = await res.json();
+    set({ user });
+  },
+
+  getValidAccessToken: async () => {
+    const { tokens, refresh } = get();
+    if (!tokens) return null;
+
+    const isExpired = (() => {
+      if (!tokens.expires_in || !tokens.issued_at) return false;
+      return (
+        Math.floor(Date.now() / 1000) >=
+        tokens.issued_at + tokens.expires_in - 30
+      );
+    })();
+
+    if (isExpired) {
+      try {
+        const refreshed = await refresh();
+        return refreshed.access_token;
+      } catch {
+        set({ tokens: null, user: null });
+        return null;
+      }
+    }
+    return tokens.access_token;
+  },
+
+  isAuthenticated: () => {
+    return !!get().tokens?.access_token;
+  },
+}));
+```
+
+### `src/store/useIntegratedAuth.ts`
+
+```typescript
+import { useEffect } from "react";
+import { useAuthStore } from "./authStore";
+
+export interface AppUser {
+  id?: string;
+  name?: string;
+  surname?: string;
+  email?: string;
+  avatar?: string;
+  isLoggedIn: boolean;
+}
+
+// Minimal app-level user state — wire into your own store/context as needed
+let _appUser: AppUser = { isLoggedIn: false };
+const _listeners = new Set<() => void>();
+
+function setAppUser(u: AppUser) {
+  _appUser = u;
+  _listeners.forEach((l) => l());
+}
+
+export function useIntegratedAuth() {
+  const authStore = useAuthStore();
+
+  // Sync OIDC state → app user state
+  useEffect(() => {
+    if (!authStore.ready) return;
+
+    const oidcLoggedIn = authStore.isAuthenticated();
+
+    if (oidcLoggedIn && authStore.user && !_appUser.isLoggedIn) {
+      setAppUser({
+        id: authStore.user.sub,
+        name: authStore.user.given_name || authStore.user.name,
+        surname: authStore.user.family_name,
+        email: authStore.user.email,
+        avatar: authStore.user.picture,
+        isLoggedIn: true,
+      });
+    } else if (!oidcLoggedIn && _appUser.isLoggedIn) {
+      setAppUser({ isLoggedIn: false });
+    }
+  }, [authStore.ready, authStore.tokens, authStore.user]);
+
+  const login = async () => {
+    await authStore.login();
+  };
+
+  const logout = async () => {
+    await authStore.logout();
+    setAppUser({ isLoggedIn: false });
+  };
+
+  const getAccessToken = () => authStore.getValidAccessToken();
+
+  return {
+    isAuthenticated: authStore.isAuthenticated(),
+    isLoggingIn: authStore.isLoggingIn,
+    ready: authStore.ready,
+    user: authStore.user,
+    appUser: _appUser,
+    login,
+    logout,
+    getAccessToken,
+  };
+}
+```
+
+### Initialize Auth in `_layout.tsx`
+
+```tsx
+import { useEffect } from "react";
+import { useAuthStore } from "@/store/authStore";
+
+export default function RootLayout() {
+  const initAuth = useAuthStore((s) => s.init);
+
+  useEffect(() => {
+    initAuth(); // Load tokens + discovery on app start
+  }, []);
+
+  // ... rest of your layout
+}
+```
+
+### Flow with Auth Enabled
+
+```
+iOS:     ATT → Onboarding → Paywall → Main App
+Android:        Onboarding → Paywall → Main App
+
+Login screen is accessible from Settings or any protected screen.
+Authenticated state is checked via useIntegratedAuth().isAuthenticated.
+```
+
+### `src/app/auth/oidc-login.tsx` — Login Screen
+
+```tsx
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  StyleSheet,
+} from "react-native";
+import { useIntegratedAuth } from "@/store/useIntegratedAuth";
+
+export default function OIDCLoginScreen() {
+  const { login, isLoggingIn, ready } = useIntegratedAuth();
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Giriş Yap</Text>
+
+      <TouchableOpacity
+        style={[
+          styles.button,
+          (!ready || isLoggingIn) && styles.buttonDisabled,
+        ]}
+        onPress={login}
+        disabled={!ready || isLoggingIn}
+      >
+        {isLoggingIn ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Hesabınla Giriş Yap</Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
+  },
+  title: { fontSize: 28, fontWeight: "700", marginBottom: 40 },
+  button: {
+    backgroundColor: "#6C63FF",
+    borderRadius: 16,
+    padding: 18,
+    width: "100%",
+    alignItems: "center",
+  },
+  buttonDisabled: { opacity: 0.5 },
+  buttonText: { color: "#fff", fontSize: 17, fontWeight: "700" },
+});
+```
+
+### `src/services/identity/index.ts` — Authenticated Axios
+
+```typescript
+import axios from "axios";
+import { AppConfig } from "@/utils/constants";
+import { useAuthStore } from "@/store/authStore";
+
+export const identityAxios = axios.create({
+  baseURL: AppConfig.identityServerAuthority,
+});
+
+identityAxios.interceptors.request.use(async (config) => {
+  const token = await useAuthStore.getState().getValidAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+```
+
+### Auth Usage Examples
+
+```tsx
+// Check auth state
+import { useIntegratedAuth } from "@/store/useIntegratedAuth";
+
+function ProfileScreen() {
+  const { isAuthenticated, user, logout } = useIntegratedAuth();
+
+  if (!isAuthenticated) return <LoginPrompt />;
+
+  return (
+    <View>
+      <Text>Hoş geldin, {user?.given_name}!</Text>
+      <Button title="Çıkış Yap" onPress={logout} />
+    </View>
+  );
+}
+```
+
+```typescript
+// Authenticated API call
+async function fetchProtectedData() {
+  const token = await useAuthStore.getState().getValidAccessToken();
+  if (!token) throw new Error("Not authenticated");
+
+  const res = await fetch("https://api.appaflytech.com/data", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.json();
+}
+```
+
+### Security Features
+
+| Feature                | Detail                                                   |
+| ---------------------- | -------------------------------------------------------- |
+| **PKCE**               | Authorization Code Flow with Proof Key for Code Exchange |
+| **SecureStore**        | Tokens stored in iOS Keychain / Android Keystore         |
+| **Ephemeral Session**  | WebBrowser doesn't share cookies; every login is fresh   |
+| **Auto Token Refresh** | Token renewed 30s before expiry automatically            |
+| **Token Cleanup**      | On refresh failure, tokens cleared and user logged out   |
+
+---
+
+## Testing Checklist
+
+- Login/logout flow (if auth enabled)
+- UI tested in all languages
+- Dark / Light mode
+- Notifications
+- Premium flow
+- Restore purchases
+- Offline support
+- Multiple screen sizes
+
+## After Development
+
+```bash
+npx expo prebuild --clean
+bun ios
+bun android
+```
+
+> NOTE: `prebuild --clean` recreates ios and android folders. Run it after modifying native modules or app.json.
