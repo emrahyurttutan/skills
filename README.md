@@ -29,13 +29,36 @@ When you ask Claude Code to create an Expo app, this skill ensures:
 
 ## Usage
 
-After installing, simply ask Claude Code:
+### Claude Code
+
+```bash
+mkdir ~/Projects/my-app && cd ~/Projects/my-app
+claude
+```
+
+Then in Claude Code:
 
 ```
 /emrah-skills Create a water reminder app
 ```
 
-Claude will automatically:
+### GitHub Copilot (VS Code Insiders / Agent Mode)
+
+Install the skill globally:
+
+```bash
+npx skills add emrahyurttutan/skills -g -a github-copilot
+```
+
+Then in Copilot Chat (agent mode):
+
+```
+Use the emrah-skills skill to create an Expo water reminder app
+```
+
+> **Note:** GitHub Copilot skill support requires VS Code Insiders or Copilot coding agent. Stable VS Code support is coming soon.
+
+The AI will automatically:
 
 - Set up the project structure
 - Configure expo-iap and AdMob
