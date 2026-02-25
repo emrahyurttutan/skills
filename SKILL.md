@@ -716,6 +716,30 @@ grep -r "lineHeight" src/
 
 Replace with padding or margin instead.
 
+### AFTER BUILDING A SCREEN (ALWAYS DO)
+
+For EVERY screen you create or modify, you MUST also create or update the corresponding Maestro test flow in `.maestro/`:
+
+| Screen                       | Flow file                                                              |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `src/app/att-permission.tsx` | `.maestro/01_att_permission.yaml`                                      |
+| `src/app/onboarding.tsx`     | `.maestro/02_onboarding.yaml`                                          |
+| `src/app/paywall.tsx`        | `.maestro/03_paywall_skip.yaml` + `.maestro/04_paywall_subscribe.yaml` |
+| `src/app/(tabs)/index.tsx`   | `.maestro/05_main_tabs.yaml`                                           |
+| `src/app/settings.tsx`       | `.maestro/06_settings.yaml`                                            |
+| Any new tab/screen           | `.maestro/0N_<screen_name>.yaml`                                       |
+
+Always add `testID` props to key interactive elements:
+
+```tsx
+<TouchableOpacity testID="skip-button" onPress={handleSkip}>
+<TouchableOpacity testID="close-button" onPress={handleClose}>
+<TouchableOpacity testID="subscribe-button" onPress={handleSubscribe}>
+<TouchableOpacity testID="get-started-button" onPress={handleComplete}>
+```
+
+Never skip this step. Screen code and its Maestro flow are delivered together.
+
 ### AFTER COMPLETING CODE (ALWAYS RUN)
 
 When you finish writing/modifying code, you MUST run these commands in order:
@@ -2533,16 +2557,224 @@ async function fetchProtectedData() {
 
 ---
 
+## Maestro E2E Tests (ALWAYS GENERATE AFTER BUILDING SCREENS)
+
+Maestro is an open-source mobile UI testing framework using YAML flow files. After building each screen, **automatically generate the corresponding Maestro flow**.
+
+### Installation
+
+```bash
+curl -fsSL "https://get.maestro.mobile.dev" | bash
+maestro --version   # requires Java 17+
+```
+
+### Project Structure
+
+```
+project-root/
+└── .maestro/
+    ├── 00_app_launch.yaml
+    ├── 01_att_permission.yaml       # iOS only
+    ├── 02_onboarding.yaml
+    ├── 03_paywall_skip.yaml
+    ├── 04_paywall_subscribe.yaml
+    ├── 05_main_tabs.yaml
+    ├── 06_settings.yaml
+    └── 07_full_flow.yaml
+```
+
+### Run Tests
+
+```bash
+maestro test .maestro/02_onboarding.yaml   # single flow
+maestro test .maestro/                     # all flows
+```
+
+### Key Commands
+
+| Command                       | Description                    |
+| ----------------------------- | ------------------------------ |
+| `launchApp: clearState: true` | Fresh launch, clears all data  |
+| `tapOn: "Text"`               | Tap by visible text            |
+| `tapOn: {id: "testID"}`       | Tap by testID prop             |
+| `assertVisible: "Text"`       | Assert element visible         |
+| `assertNotVisible: "Text"`    | Assert element NOT visible     |
+| `inputText: "value"`          | Type into focused input        |
+| `swipe: {direction: LEFT}`    | Swipe gesture                  |
+| `back`                        | Android back button            |
+| `takeScreenshot: name`        | Capture screenshot             |
+| `runFlow: path/to/flow.yaml`  | Reuse another flow             |
+| `optional: true`              | Skip step if element not found |
+
+---
+
+### Flow Templates
+
+Adapt `appId` and all text strings to the app's actual English i18n values.
+
+#### 00 — App Launch
+
+```yaml
+# .maestro/00_app_launch.yaml
+appId: com.company.appname
+---
+- launchApp:
+    clearState: true
+- takeScreenshot: app_launch
+```
+
+#### 01 — ATT Permission (iOS only)
+
+```yaml
+# .maestro/01_att_permission.yaml
+appId: com.company.appname
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Allow Tracking"
+- takeScreenshot: att_screen
+- tapOn: "Allow Tracking"
+- tapOn:
+    text: "Allow"
+    optional: true
+- takeScreenshot: att_after
+```
+
+#### 02 — Onboarding
+
+```yaml
+# .maestro/02_onboarding.yaml
+appId: com.company.appname
+---
+- launchApp:
+    clearState: true
+# Dismiss ATT if present (iOS)
+- tapOn:
+    text: "Allow Tracking"
+    optional: true
+- tapOn:
+    text: "Allow"
+    optional: true
+# Swipe through slides
+- takeScreenshot: onboarding_slide_1
+- swipe:
+    direction: LEFT
+    duration: 400
+- takeScreenshot: onboarding_slide_2
+- swipe:
+    direction: LEFT
+    duration: 400
+- takeScreenshot: onboarding_slide_3
+- swipe:
+    direction: LEFT
+    duration: 400
+- takeScreenshot: onboarding_slide_4
+- tapOn: "Get Started"
+- takeScreenshot: onboarding_complete
+```
+
+#### 03 — Paywall Skip
+
+```yaml
+# .maestro/03_paywall_skip.yaml
+appId: com.company.appname
+---
+- runFlow: 02_onboarding.yaml
+- assertVisible: "Yearly"
+- assertVisible: "Monthly"
+- takeScreenshot: paywall_screen
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    text: "×"
+    optional: true
+- takeScreenshot: paywall_closed
+```
+
+#### 04 — Paywall Plan Selection
+
+```yaml
+# .maestro/04_paywall_subscribe.yaml
+appId: com.company.appname
+---
+- runFlow: 02_onboarding.yaml
+- tapOn: "Yearly"
+- takeScreenshot: paywall_yearly_selected
+- tapOn: "Monthly"
+- takeScreenshot: paywall_monthly_selected
+# Opens store sheet — cannot complete purchase in automated test
+- tapOn: "Subscribe"
+- takeScreenshot: paywall_subscribe_tapped
+```
+
+#### 05 — Main Tabs Navigation
+
+```yaml
+# .maestro/05_main_tabs.yaml
+appId: com.company.appname
+---
+- runFlow: 02_onboarding.yaml
+- runFlow: 03_paywall_skip.yaml
+- takeScreenshot: main_home
+- tapOn: "Settings"
+- takeScreenshot: main_settings
+- tapOn: "Home"
+- takeScreenshot: main_home_again
+```
+
+#### 06 — Settings Screen
+
+```yaml
+# .maestro/06_settings.yaml
+appId: com.company.appname
+---
+- runFlow: 02_onboarding.yaml
+- runFlow: 03_paywall_skip.yaml
+- tapOn: "Settings"
+- assertVisible: "Language"
+- assertVisible: "Theme"
+- assertVisible: "Notifications"
+- takeScreenshot: settings_screen
+```
+
+#### 07 — Full End-to-End Flow
+
+```yaml
+# .maestro/07_full_flow.yaml
+appId: com.company.appname
+---
+- launchApp:
+    clearState: true
+- runFlow: 01_att_permission.yaml
+- runFlow: 02_onboarding.yaml
+- runFlow: 03_paywall_skip.yaml
+- runFlow: 05_main_tabs.yaml
+- runFlow: 06_settings.yaml
+- takeScreenshot: full_flow_complete
+```
+
+### Notes
+
+- `01_att_permission.yaml` — **iOS only**, skip on Android builds
+- System dialogs use `optional: true` (vary by OS/device)
+- Android: `- back` simulates hardware back button
+- iOS simulator: `maestro --device booted test .maestro/`
+- Use `runFlow` to chain — no duplicate setup steps
+
+---
+
 ## Testing Checklist
 
-- Login/logout flow (if auth enabled)
-- UI tested in all languages
-- Dark / Light mode
-- Notifications
-- Premium flow
-- Restore purchases
-- Offline support
-- Multiple screen sizes
+- [ ] `maestro test .maestro/` — all flows pass on iOS and Android
+- [ ] Login/logout flow (if auth enabled)
+- [ ] UI tested in all languages (tr / en)
+- [ ] Dark / Light mode
+- [ ] Notifications
+- [ ] Premium flow
+- [ ] Restore purchases
+- [ ] Offline support
+- [ ] Multiple screen sizes
 
 ## After Development
 
