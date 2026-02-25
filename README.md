@@ -11,6 +11,8 @@ A Claude Code skill for building production-ready Expo React Native mobile appli
 - **Paywall** - Subscription options with 50% OFF yearly badge
 - **NativeTabs** - Native tab navigation
 - **Theme** - Light/Dark/System mode support
+- **HeroUI Native** - Beautiful, modern React Native UI components
+- **Uniwind** - Tailwind v4 styling for React Native (replaces NativeWind)
 
 ## Installation
 
@@ -76,6 +78,8 @@ The AI will automatically:
 - i18next + react-i18next
 - expo-video
 - expo-sqlite (localStorage polyfill)
+- HeroUI Native (UI component library)
+- Uniwind + Tailwind v4 (styling)
 
 ## License
 

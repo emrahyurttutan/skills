@@ -20,32 +20,254 @@ When creating a new Expo project, you MUST include ALL of the following:
 - [ ] `src/app/paywall.tsx` - expo-iap paywall screen (shown after onboarding)
 - [ ] `src/app/settings.tsx` - Settings screen with language, theme, notifications, and reset onboarding options
 
-### Onboarding Video Implementation (REQUIRED)
+### Onboarding Screen Implementation (REQUIRED)
 
-The onboarding screen MUST have a fullscreen background video. Use a URL, not a local file:
+The onboarding screen MUST have a fullscreen background video. Use a **local asset** (`require("@/assets/...")`). The video is looped, muted, and played automatically.
+
+Full implementation of `src/app/onboarding.tsx`:
 
 ```tsx
+import { useOnboarding } from "@/context/onboarding-context";
+import { MaterialIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  Dimensions,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-const VIDEO_URL =
-  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+const VIDEO_SOURCE = require("@/assets/onboarding.mp4");
 
-const player = useVideoPlayer(VIDEO_URL, (player) => {
-  player.loop = true;
-  player.muted = true;
-  player.play();
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+const SLIDES = [
+  {
+    key: "1",
+    titleKey: "onboarding.slide1.title",
+    descKey: "onboarding.slide1.description",
+    icon: "access-time",
+  },
+  {
+    key: "2",
+    titleKey: "onboarding.slide2.title",
+    descKey: "onboarding.slide2.description",
+    icon: "explore",
+  },
+  {
+    key: "3",
+    titleKey: "onboarding.slide3.title",
+    descKey: "onboarding.slide3.description",
+    icon: "calendar-today",
+  },
+  {
+    key: "4",
+    titleKey: "onboarding.slide4.title",
+    descKey: "onboarding.slide4.description",
+    icon: "lock",
+  },
+];
+
+export default function OnboardingScreen() {
+  const { t } = useTranslation();
+  const { setOnboardingCompleted } = useOnboarding();
+  const [activeIndex, setActiveIndex] = useState(0);
+  const flatListRef = useRef<FlatList>(null);
+
+  const player = useVideoPlayer(VIDEO_SOURCE, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
+
+  const handleNext = () => {
+    if (activeIndex < SLIDES.length - 1) {
+      flatListRef.current?.scrollToIndex({
+        index: activeIndex + 1,
+        animated: true,
+      });
+      setActiveIndex(activeIndex + 1);
+    } else {
+      handleComplete();
+    }
+  };
+
+  const handleComplete = async () => {
+    await setOnboardingCompleted(true);
+    router.replace("/paywall");
+  };
+
+  const isLast = activeIndex === SLIDES.length - 1;
+
+  return (
+    <View style={styles.container}>
+      {/* Background video */}
+      <VideoView
+        player={player}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        nativeControls={false}
+      />
+      {/* Gradient overlay */}
+      <LinearGradient
+        colors={["rgba(0,0,0,0.3)", "rgba(0,0,0,0.7)", "rgba(0,0,0,0.9)"]}
+        style={StyleSheet.absoluteFill}
+      />
+
+      <SafeAreaView style={styles.safeArea}>
+        {/* Skip button */}
+        <View style={styles.topBar}>
+          <TouchableOpacity style={styles.skipBtn} onPress={handleComplete}>
+            <Text style={styles.skipText}>{t("onboarding.skip")}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Slides */}
+        <FlatList
+          ref={flatListRef}
+          data={SLIDES}
+          horizontal
+          pagingEnabled
+          scrollEnabled
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(item) => item.key}
+          onMomentumScrollEnd={(e) => {
+            const index = Math.round(
+              e.nativeEvent.contentOffset.x / SCREEN_WIDTH,
+            );
+            setActiveIndex(index);
+          }}
+          renderItem={({ item }) => (
+            <View style={styles.slide}>
+              <View style={styles.slideIconWrap}>
+                <MaterialIcons
+                  name={item.icon as any}
+                  size={52}
+                  color="#FFFFFF"
+                />
+              </View>
+              <Text style={styles.slideTitle}>{t(item.titleKey)}</Text>
+              <Text style={styles.slideDesc}>{t(item.descKey)}</Text>
+            </View>
+          )}
+        />
+
+        {/* Dots */}
+        <View style={styles.dots}>
+          {SLIDES.map((_, i) => (
+            <View
+              key={i}
+              style={[styles.dot, i === activeIndex && styles.dotActive]}
+            />
+          ))}
+        </View>
+
+        {/* CTA */}
+        <View style={styles.footer}>
+          <TouchableOpacity style={styles.button} onPress={handleNext}>
+            <Text style={styles.buttonText}>
+              {isLast ? t("onboarding.getStarted") : t("onboarding.next")}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#000" },
+  safeArea: { flex: 1 },
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  skipBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+  },
+  skipText: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  slide: {
+    width: SCREEN_WIDTH,
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 40,
+  },
+  slideIconWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: "rgba(65,114,157,0.35)",
+    borderWidth: 1.5,
+    borderColor: "rgba(65,114,157,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 32,
+  },
+  slideTitle: {
+    fontSize: 32,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  slideDesc: {
+    fontSize: 17,
+    color: "rgba(255,255,255,0.75)",
+    textAlign: "center",
+  },
+  dots: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 24,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "rgba(255,255,255,0.3)",
+  },
+  dotActive: {
+    backgroundColor: "#FFFFFF",
+    width: 24,
+  },
+  footer: { padding: 24, paddingBottom: 40 },
+  button: {
+    backgroundColor: "#41729D",
+    borderRadius: 16,
+    padding: 18,
+    alignItems: "center",
+  },
+  buttonText: { color: "#FFFFFF", fontSize: 17, fontWeight: "700" },
 });
-
-// In render:
-<VideoView
-  player={player}
-  style={StyleSheet.absoluteFill}
-  contentFit="cover"
-  nativeControls={false}
-/>;
 ```
 
-Do NOT just import expo-video without actually using the VideoView component.
+> **Notes:**
+>
+> - Place your onboarding video at `assets/onboarding.mp4` (adjust the `require` path to match the actual file)
+> - `SafeAreaView` is from `react-native-safe-area-context`, NOT `react-native`
+> - Slide icons use `@expo/vector-icons` `MaterialIcons` — adjust icon names per app theme
+> - Slides array and icon names should be customized per app
+> - Add required i18n keys: `onboarding.slide1.title`, `onboarding.slide1.description`, etc., plus `onboarding.skip`, `onboarding.next`, `onboarding.getStarted`
 
 ### Required Navigation (ALWAYS USE)
 
@@ -54,6 +276,8 @@ Do NOT just import expo-video without actually using the VideoView component.
 ### Required Context Providers (ALWAYS WRAP)
 
 ```tsx
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { HeroUINativeProvider } from "heroui-native/provider";
 import { ThemeProvider } from "@/context/theme-context";
 import { PurchasesProvider } from "@/context/purchases-context";
 import {
@@ -62,27 +286,41 @@ import {
   ThemeProvider as NavigationThemeProvider,
 } from "@react-navigation/native";
 
-<ThemeProvider>
-  <OnboardingProvider>
-    <PurchasesProvider>
-      <AdsProvider>
-        <NavigationThemeProvider
-          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-        >
-          <Stack />
-        </NavigationThemeProvider>
-      </AdsProvider>
-    </PurchasesProvider>
-  </OnboardingProvider>
-</ThemeProvider>;
+<GestureHandlerRootView style={{ flex: 1 }}>
+  <HeroUINativeProvider>
+    <ThemeProvider>
+      <OnboardingProvider>
+        <PurchasesProvider>
+          <AdsProvider>
+            <NavigationThemeProvider
+              value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+            >
+              <Stack />
+            </NavigationThemeProvider>
+          </AdsProvider>
+        </PurchasesProvider>
+      </OnboardingProvider>
+    </ThemeProvider>
+  </HeroUINativeProvider>
+</GestureHandlerRootView>;
 ```
 
 ### Required Libraries (ALWAYS INSTALL)
 
-Use `npx expo install` to install libraries (NOT npm/yarn/bun install):
+Use `npx expo install` to install Expo libraries (NOT npm/yarn/bun install).
+Use `bun add` for non-Expo libraries:
 
 ```bash
+# Expo libraries
 npx expo install expo-iap expo-build-properties expo-tracking-transparency react-native-google-mobile-ads expo-notifications i18next react-i18next expo-localization react-native-reanimated expo-video expo-audio expo-sqlite expo-linear-gradient
+
+# HeroUI Native + Uniwind (Tailwind v4 for React Native)
+bun add heroui-native
+bun add uniwind tailwindcss
+
+# HeroUI Native peer dependencies
+npx expo install react-native-screens react-native-reanimated react-native-gesture-handler react-native-worklets react-native-safe-area-context react-native-svg
+bun add tailwind-variants tailwind-merge @gorhom/bottom-sheet
 ```
 
 Libraries:
@@ -97,6 +335,188 @@ Libraries:
 - `expo-video` + `expo-audio`
 - `expo-sqlite` (for localStorage)
 - `expo-linear-gradient` (for gradient overlays)
+- `heroui-native` (UI component library)
+- `uniwind` + `tailwindcss` (Tailwind v4 styling for React Native)
+
+### HeroUI Native + Uniwind Setup (REQUIRED)
+
+> **IMPORTANT**: HeroUI Native uses **Uniwind** (Tailwind v4 for React Native) — NOT NativeWind. These two are incompatible. Always use Uniwind when HeroUI Native is in the project.
+
+#### Step 1 — metro.config.js
+
+```js
+const { getDefaultConfig } = require("expo/metro-config");
+const { withUniwindConfig } = require("uniwind/metro");
+
+const config = getDefaultConfig(__dirname);
+
+// withUniwindConfig MUST be the outermost wrapper
+module.exports = withUniwindConfig(config, {
+  cssEntryFile: "./src/global.css",
+});
+```
+
+#### Step 2 — global.css
+
+Create `src/global.css`:
+
+```css
+@import "tailwindcss";
+@import "uniwind";
+@import "heroui-native/styles";
+
+/* Path to heroui-native lib inside node_modules (relative to global.css) */
+/* If global.css is at src/: ../node_modules/heroui-native/lib */
+@source "../node_modules/heroui-native/lib";
+```
+
+#### Step 3 — Import global.css in \_layout.tsx
+
+```tsx
+import "../global.css"; // adjust path as needed
+```
+
+> **WARNING**: Do NOT import `global.css` in the root `index.ts`/`index.js` where you register the Root Component — import it somewhere inside `src/` to avoid full reloads instead of hot reloads.
+
+#### Step 4 — Wrap App with HeroUINativeProvider
+
+```tsx
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { HeroUINativeProvider } from "heroui-native";
+
+export default function RootLayout() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <HeroUINativeProvider>
+        {/* your existing providers + Stack */}
+      </HeroUINativeProvider>
+    </GestureHandlerRootView>
+  );
+}
+```
+
+#### HeroUI Native Granular Imports (RECOMMENDED for bundle size)
+
+```tsx
+// ✅ Granular imports — use when you need only a few components
+import { HeroUINativeProvider } from "heroui-native/provider";
+import { Button } from "heroui-native/button";
+import { Card } from "heroui-native/card";
+import { Toast } from "heroui-native/toast";
+
+// General import — use when many components are needed
+import { Button, Card, Switch } from "heroui-native";
+```
+
+> **IMPORTANT**: Mix granular and general imports consistently. Even one `import from "heroui-native"` (general) in the codebase breaks bundle optimization. Choose one approach and stick to it.
+
+#### HeroUI Native Available Components
+
+| Category       | Components                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Buttons**    | `Button`, `CloseButton`                                                                                                                  |
+| **Controls**   | `Slider`, `Switch`                                                                                                                       |
+| **Forms**      | `Checkbox`, `ControlField`, `Description`, `FieldError`, `Input`, `InputOTP`, `Label`, `RadioGroup`, `SearchField`, `Select`, `Textarea` |
+| **Navigation** | `Accordion`, `ListGroup`, `Tabs`                                                                                                         |
+| **Overlays**   | `BottomSheet`, `Dialog`, `Popover`, `Toast`                                                                                              |
+| **Feedback**   | `Alert`, `Skeleton`, `SkeletonGroup`, `Spinner`                                                                                          |
+| **Layout**     | `Card`, `Separator`, `Surface`                                                                                                           |
+| **Media**      | `Avatar`                                                                                                                                 |
+| **Data**       | `Chip`                                                                                                                                   |
+| **Utilities**  | `PressableFeedback`, `ScrollShadow`                                                                                                      |
+
+#### HeroUI Native in Paywall Screen
+
+Use HeroUI Native components in the paywall for a polished UI:
+
+```tsx
+import { Button, Card, Chip } from "heroui-native";
+// or granular:
+import { Button } from "heroui-native/button";
+import { Card } from "heroui-native/card";
+import { Chip } from "heroui-native/chip";
+
+// Subscription card with badge
+<Card className="border-2 border-primary">
+  <Card.Header>
+    <Chip color="success" size="sm">50% OFF</Chip>
+  </Card.Header>
+  <Card.Body>
+    <Text className="text-lg font-bold">Yearly Plan</Text>
+    <Text className="text-default-500">$129.99/year</Text>
+  </Card.Body>
+</Card>
+
+// CTA Button
+<Button
+  color="primary"
+  size="lg"
+  className="w-full"
+  onPress={handlePurchase}
+>
+  Start Free Trial
+</Button>
+```
+
+#### HeroUI Native in Settings Screen
+
+```tsx
+import { Switch } from "heroui-native/switch";
+import { ListGroup } from "heroui-native/list-group";
+import { Separator } from "heroui-native/separator";
+
+<ListGroup>
+  <ListGroup.Item
+    title={t("settings.notifications")}
+    endContent={
+      <Switch
+        isSelected={notificationsEnabled}
+        onValueChange={setNotificationsEnabled}
+      />
+    }
+  />
+  <Separator />
+  <ListGroup.Item
+    title={t("settings.language")}
+    endContent={<Text>{currentLanguage}</Text>}
+    onPress={handleLanguage}
+  />
+</ListGroup>;
+```
+
+#### HeroUI Native Toast Usage
+
+```tsx
+import { Toast } from "heroui-native/toast";
+import { useToast } from "heroui-native";
+
+function MyComponent() {
+  const { addToast } = useToast();
+
+  const handleSuccess = () => {
+    addToast({
+      title: "Purchase Successful!",
+      description: "You are now a premium member.",
+      color: "success",
+    });
+  };
+}
+```
+
+#### Tailwind / Uniwind Class Usage
+
+With Uniwind, use Tailwind classes directly on React Native components:
+
+```tsx
+import { View, Text } from "react-native";
+
+// ✅ Works with Uniwind
+<View className="flex-1 bg-background items-center justify-center p-4">
+  <Text className="text-2xl font-bold text-foreground">Hello</Text>
+</View>;
+```
+
+HeroUI Native's theme tokens (e.g. `bg-background`, `text-foreground`, `border-primary`) are available automatically via the `@import 'heroui-native/styles'` in `global.css`.
 
 ### expo-iap Configuration (REQUIRED in app.json)
 
@@ -235,6 +655,9 @@ Example:
 - ❌ `expo-ads-admob` - Use `react-native-google-mobile-ads` instead
 - ❌ Any other ads library - ONLY use `react-native-google-mobile-ads`
 - ❌ Reanimated hooks inside callbacks - Call at component top level
+- ❌ `nativewind` - Use `uniwind` (Tailwind v4) instead when HeroUI Native is present
+- ❌ Mixing `nativewind` and `uniwind` in the same project - They are incompatible
+- ❌ `SafeAreaView` from `react-native` - Use `import { SafeAreaView } from 'react-native-safe-area-context'` instead
 
 ### Reanimated Usage (IMPORTANT)
 
@@ -345,6 +768,8 @@ bunx create-expo -t default@next app-name
 
 - **Framework**: Expo, React Native
 - **Navigation**: Expo Router (file-based routing), NativeTabs
+- **UI Library**: HeroUI Native (`heroui-native`) — beautiful, modern components
+- **Styling**: Tailwind v4 via Uniwind (`uniwind`) — replaces NativeWind
 - **State Management**: React Context API
 - **Translations**: i18next, react-i18next
 - **Purchases**: expo-iap (expo-iap)
@@ -497,8 +922,9 @@ eas submit --platform android
 - Wraps `useIAP` hook and checks subscription status **on app startup**
 - Product SKUs: weekly (`weekly_premium`) and yearly (`yearly_premium`)
 - Paywall: `app/paywall.tsx`
-- Exposes `usePurchases()` → `{ isPremium, loading, refreshPremiumStatus }`
+- Exposes `usePurchases()` → `{ isPremium, loading, premiumExpiryDate, premiumProductId, refreshPremiumStatus }`
 - `refreshPremiumStatus()` must be called after a successful purchase
+- `drainPendingTransactions()` runs on startup to acknowledge stuck transactions
 - Use `getAvailablePurchases()` for restore purchases flow
 - Always call `finishTransaction` after a successful purchase
 
@@ -507,20 +933,34 @@ eas submit --platform android
 Create `src/context/purchases-context.tsx`:
 
 ```tsx
-import { createContext, useContext, useEffect, useState } from "react";
-import { useIAP } from "expo-iap";
+import { finishTransaction, getAvailablePurchases, useIAP } from "expo-iap";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 
-const SUBSCRIPTION_SKUS = ["weekly_premium", "yearly_premium"];
+// Replace these SKUs with the app's actual product IDs
+const SUBSCRIPTION_SKUS = [
+  "com.company.appname.monthly",
+  "com.company.appname.yearly",
+];
 
 interface PurchasesContextValue {
   isPremium: boolean;
   loading: boolean;
+  premiumExpiryDate: Date | null;
+  premiumProductId: string | null;
   refreshPremiumStatus: () => Promise<void>;
 }
 
 const PurchasesContext = createContext<PurchasesContextValue>({
   isPremium: false,
   loading: true,
+  premiumExpiryDate: null,
+  premiumProductId: null,
   refreshPremiumStatus: async () => {},
 });
 
@@ -528,26 +968,81 @@ export function PurchasesProvider({ children }: { children: React.ReactNode }) {
   const { hasActiveSubscriptions } = useIAP();
   const [isPremium, setIsPremium] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [premiumExpiryDate, setPremiumExpiryDate] = useState<Date | null>(null);
+  const [premiumProductId, setPremiumProductId] = useState<string | null>(null);
 
-  const refreshPremiumStatus = async () => {
+  /** Acknowledge any transactions left unfinished (e.g. app killed mid-purchase). */
+  const drainPendingTransactions = async () => {
     try {
+      const purchases = await getAvailablePurchases();
+      for (const purchase of purchases) {
+        try {
+          await finishTransaction({ purchase, isConsumable: false });
+        } catch {
+          // already acknowledged — safe to ignore
+        }
+      }
+    } catch {
+      // IAP unavailable (simulator, no network, etc.)
+    }
+  };
+
+  const refreshPremiumStatus = useCallback(async () => {
+    try {
+      await drainPendingTransactions();
       const hasPremium = await hasActiveSubscriptions(SUBSCRIPTION_SKUS);
       setIsPremium(hasPremium);
+
+      if (hasPremium) {
+        // Find the active subscription with the latest expiry date
+        const purchases = await getAvailablePurchases();
+        const activeSubs = purchases.filter((p) =>
+          SUBSCRIPTION_SKUS.includes(p.productId),
+        );
+        // Pick the one with the furthest expiry (expirationDateIOS is ms epoch, iOS only)
+        let bestExpiry: Date | null = null;
+        let bestProductId: string | null = null;
+        for (const p of activeSubs) {
+          const expMs = (p as { expirationDateIOS?: number | null })
+            .expirationDateIOS;
+          if (expMs) {
+            const d = new Date(expMs);
+            if (!bestExpiry || d > bestExpiry) {
+              bestExpiry = d;
+              bestProductId = p.productId;
+            }
+          } else if (!bestProductId) {
+            // Android: no expirationDate field – record productId at least
+            bestProductId = p.productId;
+          }
+        }
+        setPremiumExpiryDate(bestExpiry);
+        setPremiumProductId(bestProductId);
+      } else {
+        setPremiumExpiryDate(null);
+        setPremiumProductId(null);
+      }
     } catch (error) {
       console.error("Failed to check subscription status:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [hasActiveSubscriptions]);
 
   // ✅ App açıldığında otomatik olarak satın alma durumu kontrol edilir
   useEffect(() => {
     refreshPremiumStatus();
-  }, []);
+  }, [refreshPremiumStatus]);
 
   return (
     <PurchasesContext.Provider
-      value={{ isPremium, loading, refreshPremiumStatus }}
+      value={{
+        isPremium,
+        loading,
+        premiumExpiryDate,
+        premiumProductId,
+        refreshPremiumStatus,
+      }}
     >
       {children}
     </PurchasesContext.Provider>
@@ -558,6 +1053,13 @@ export function usePurchases() {
   return useContext(PurchasesContext);
 }
 ```
+
+> **Notes:**
+>
+> - `drainPendingTransactions` acknowledges unfinished transactions on startup (prevents stuck purchases)
+> - `premiumExpiryDate` is iOS only (`expirationDateIOS`); Android doesn't expose this field
+> - `premiumProductId` lets you know which plan (monthly/yearly) is active
+> - Replace `SUBSCRIPTION_SKUS` with the app's actual App Store / Play Store product IDs
 
 After a successful purchase in `paywall.tsx`, always call `refreshPremiumStatus()`:
 
@@ -614,8 +1116,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
-  SafeAreaView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { requestTrackingPermissionsAsync } from "expo-tracking-transparency";
 import { LinearGradient } from "expo-linear-gradient";
@@ -902,37 +1404,532 @@ export default function RootLayout() {
 }
 ```
 
-### Paywall Subscription Options (REQUIRED)
+### Paywall Screen Implementation (REQUIRED)
 
-Paywall MUST have two subscription options:
-
-1. **Weekly** - Default option
-2. **Yearly** - With "50% OFF" badge (recommended, should be highlighted)
+Full implementation of `src/app/paywall.tsx`:
 
 ```tsx
-// Subscription option component example:
-const subscriptionOptions = [
-  {
-    id: "weekly",
-    title: t("paywall.weekly"),
-    price: "$4.99/week",
-    selected: selectedPlan === "weekly",
-  },
-  {
-    id: "yearly",
-    title: t("paywall.yearly"),
-    price: "$129.99/year",
-    badge: "50% OFF",
-    selected: selectedPlan === "yearly",
-  },
+import { usePurchases } from "@/context/purchases-context";
+import { MaterialIcons } from "@expo/vector-icons";
+import type { Purchase } from "expo-iap";
+import { useIAP } from "expo-iap";
+import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+// Replace with actual product IDs
+const SKUS = {
+  monthly: "com.company.appname.monthly",
+  yearly: "com.company.appname.yearly",
+};
+
+// Replace with actual URLs
+const TERMS_URL = "https://example.com/terms.html";
+const PRIVACY_URL = "https://example.com/privacy.html";
+
+interface Feature {
+  key: string;
+  icon: keyof typeof MaterialIcons.glyphMap;
+}
+
+const FEATURES: Feature[] = [
+  { key: "paywall.feature1", icon: "block" },
+  { key: "paywall.feature2", icon: "notifications-active" },
+  { key: "paywall.feature3", icon: "cloud-off" },
 ];
 
-// Yearly option should be visually highlighted as the best value
+export default function PaywallScreen() {
+  const { t } = useTranslation();
+  const { refreshPremiumStatus, isPremium } = usePurchases();
+
+  const [selectedPlan, setSelectedPlan] = useState<"monthly" | "yearly">(
+    "yearly",
+  );
+  const [purchasing, setPurchasing] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+
+  const {
+    connected,
+    subscriptions,
+    fetchProducts,
+    requestPurchase,
+    finishTransaction,
+    restorePurchases,
+  } = useIAP({
+    onPurchaseSuccess: async (purchase: Purchase) => {
+      try {
+        await finishTransaction({ purchase, isConsumable: false });
+        await refreshPremiumStatus();
+        router.replace("/(tabs)");
+      } catch (err) {
+        console.error("Finish transaction error:", err);
+      } finally {
+        setPurchasing(false);
+      }
+    },
+    onPurchaseError: (error) => {
+      setPurchasing(false);
+      if ((error as any)?.code !== "E_USER_CANCELLED") {
+        Alert.alert("Error", t("errors.purchaseFailed"));
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (connected) {
+      fetchProducts({ skus: [SKUS.monthly, SKUS.yearly], type: "subs" });
+    }
+  }, [connected]);
+
+  const handleClose = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)");
+    }
+  };
+
+  const handleSubscribe = async () => {
+    if (purchasing) return;
+    setPurchasing(true);
+    try {
+      const sku = selectedPlan === "monthly" ? SKUS.monthly : SKUS.yearly;
+      await requestPurchase(
+        Platform.OS === "ios"
+          ? { request: { apple: { sku } }, type: "subs" }
+          : { request: { google: { skus: [sku] } }, type: "subs" },
+      );
+    } catch {
+      setPurchasing(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    try {
+      await restorePurchases();
+      await refreshPremiumStatus();
+      if (isPremium) {
+        router.replace("/(tabs)");
+      } else {
+        Alert.alert("", t("errors.noActivePurchases"));
+      }
+    } catch {
+      Alert.alert("Error", t("errors.restoreFailed"));
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const monthlyProduct = subscriptions?.find((p) => p.id === SKUS.monthly);
+  const yearlyProduct = subscriptions?.find((p) => p.id === SKUS.yearly);
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <LinearGradient
+        colors={["#0A0F1E", "#111827", "#0F172A"]}
+        style={StyleSheet.absoluteFill}
+      />
+
+      <SafeAreaView style={styles.safeArea}>
+        {/* Top bar — close button */}
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={handleClose}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <MaterialIcons
+              name="close"
+              size={18}
+              color="rgba(255,255,255,0.7)"
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Scrollable content */}
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          {/* Hero icon */}
+          <View style={styles.heroWrap}>
+            <LinearGradient
+              colors={["#2563EB", "#1D4ED8"]}
+              style={styles.heroGradient}
+            >
+              <MaterialIcons name="workspace-premium" size={40} color="#fff" />
+            </LinearGradient>
+            <View style={styles.heroBadge}>
+              <MaterialIcons name="verified" size={14} color="#34D399" />
+            </View>
+          </View>
+
+          <Text style={styles.title}>{t("paywall.title")}</Text>
+          <Text style={styles.subtitle}>{t("paywall.subtitle")}</Text>
+
+          {/* Features */}
+          <View style={styles.featuresCard}>
+            {FEATURES.map(({ key, icon }, i) => (
+              <View
+                key={key}
+                style={[
+                  styles.featureRow,
+                  i < FEATURES.length - 1 && styles.featureRowBorder,
+                ]}
+              >
+                <View style={styles.featureIconWrap}>
+                  <MaterialIcons name={icon} size={18} color="#60A5FA" />
+                </View>
+                <Text style={styles.featureText}>{t(key)}</Text>
+                <MaterialIcons name="check" size={16} color="#34D399" />
+              </View>
+            ))}
+          </View>
+
+          {/* Plan selector — side by side */}
+          <View style={styles.plansRow}>
+            {/* Monthly */}
+            <TouchableOpacity
+              style={[
+                styles.planCard,
+                selectedPlan === "monthly" && styles.planCardSelected,
+              ]}
+              onPress={() => setSelectedPlan("monthly")}
+              activeOpacity={0.8}
+            >
+              {selectedPlan === "monthly" && <View style={styles.planDot} />}
+              <Text style={styles.planName}>{t("paywall.monthly")}</Text>
+              <Text style={styles.planPrice}>
+                {monthlyProduct?.displayPrice ?? t("paywall.monthlyPrice")}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Yearly */}
+            <TouchableOpacity
+              style={[
+                styles.planCard,
+                styles.planCardYearly,
+                selectedPlan === "yearly" && styles.planCardSelected,
+              ]}
+              onPress={() => setSelectedPlan("yearly")}
+              activeOpacity={0.8}
+            >
+              <View style={styles.popularBadge}>
+                <Text style={styles.popularBadgeText}>
+                  {t("paywall.yearlyBadge")}
+                </Text>
+              </View>
+              {selectedPlan === "yearly" && <View style={styles.planDot} />}
+              <Text style={styles.planName}>{t("paywall.yearly")}</Text>
+              <Text style={styles.planPrice}>
+                {yearlyProduct?.displayPrice ?? t("paywall.yearlyPrice")}
+              </Text>
+              <Text style={styles.planSubPrice}>
+                {t("paywall.yearlyPerWeek")}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        {/* Sticky bottom CTA */}
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={styles.subscribeTouchable}
+            onPress={handleSubscribe}
+            disabled={purchasing}
+            activeOpacity={0.9}
+          >
+            <LinearGradient
+              colors={
+                purchasing ? ["#374151", "#374151"] : ["#2563EB", "#1D4ED8"]
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.subscribeButton}
+            >
+              {purchasing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.subscribeText}>
+                  {t("paywall.subscribe")}
+                </Text>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <Text style={styles.autoRenewText}>{t("paywall.autoRenew")}</Text>
+
+          <View style={styles.footerLinks}>
+            <TouchableOpacity onPress={handleRestore} disabled={restoring}>
+              {restoring ? (
+                <ActivityIndicator
+                  color="rgba(255,255,255,0.45)"
+                  size="small"
+                />
+              ) : (
+                <Text style={styles.footerLink}>{t("paywall.restore")}</Text>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.footerDot}>·</Text>
+            <Text
+              style={styles.footerLink}
+              onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
+            >
+              {t("paywall.terms")}
+            </Text>
+            <Text style={styles.footerDot}>·</Text>
+            <Text
+              style={styles.footerLink}
+              onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
+            >
+              {t("paywall.privacy")}
+            </Text>
+          </View>
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  safeArea: { flex: 1 },
+
+  /* Top bar */
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* Scroll */
+  scroll: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    alignItems: "center",
+  },
+
+  /* Hero */
+  heroWrap: { marginTop: 8, marginBottom: 20 },
+  heroGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroBadge: {
+    position: "absolute",
+    bottom: -4,
+    right: -4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#0A0F1E",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* Text */
+  title: {
+    fontSize: 26,
+    fontWeight: "700",
+    color: "#F9FAFB",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  subtitle: {
+    fontSize: 15,
+    color: "rgba(255,255,255,0.5)",
+    textAlign: "center",
+    marginBottom: 28,
+  },
+
+  /* Features card */
+  featuresCard: {
+    width: "100%",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    marginBottom: 20,
+    overflow: "hidden",
+  },
+  featureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  featureRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  featureIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "rgba(37,99,235,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  featureText: {
+    flex: 1,
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+
+  /* Plans */
+  plansRow: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 12,
+  },
+  planCard: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    padding: 16,
+    alignItems: "center",
+    minHeight: 100,
+    justifyContent: "center",
+    gap: 4,
+  },
+  planCardYearly: { position: "relative", overflow: "visible" },
+  planCardSelected: {
+    borderColor: "#2563EB",
+    backgroundColor: "rgba(37,99,235,0.12)",
+  },
+  planDot: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#2563EB",
+  },
+  planName: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  planPrice: {
+    color: "#F9FAFB",
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  planSubPrice: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 11,
+    textAlign: "center",
+  },
+  popularBadge: {
+    position: "absolute",
+    top: -11,
+    alignSelf: "center",
+    backgroundColor: "#F59E0B",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  popularBadgeText: {
+    color: "#000",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+
+  /* Footer */
+  footer: {
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === "android" ? 16 : 8,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.07)",
+  },
+  subscribeTouchable: {
+    borderRadius: 14,
+    overflow: "hidden",
+    marginBottom: 10,
+  },
+  subscribeButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+  },
+  subscribeText: {
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  autoRenewText: {
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 11,
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  footerLinks: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  footerLink: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 12,
+    textDecorationLine: "underline",
+  },
+  footerDot: {
+    color: "rgba(255,255,255,0.2)",
+    fontSize: 12,
+  },
+});
 ```
 
-- Yearly option should show the discount badge prominently
-- Default selection can be weekly, but yearly should be visually recommended
-- Use expo-iap product SKU identifiers to match these options (e.g. `weekly_premium`, `yearly_premium`)
+> **Notes:**
+>
+> - Replace `SKUS` with the app's actual App Store / Play Store product IDs
+> - Replace `TERMS_URL` and `PRIVACY_URL` with actual links
+> - Default selected plan is **yearly** — adjust `FEATURES` array per app
+> - `displayPrice` from `subscriptions` shows the real localized price; fallback strings are used while products load
+> - Add i18n keys: `paywall.title`, `paywall.subtitle`, `paywall.monthly`, `paywall.yearly`, `paywall.monthlyPrice`, `paywall.yearlyPrice`, `paywall.yearlyBadge`, `paywall.yearlyPerWeek`, `paywall.subscribe`, `paywall.autoRenew`, `paywall.restore`, `paywall.terms`, `paywall.privacy`, `paywall.feature1-3`, `errors.purchaseFailed`, `errors.noActivePurchases`, `errors.restoreFailed`
 
 ### Settings Screen Options (REQUIRED)
 
