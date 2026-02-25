@@ -15,26 +15,6 @@ When creating a new Expo project, you MUST include ALL of the following:
 - [ ] `src/app/paywall.tsx` - expo-iap paywall screen (shown after onboarding)
 - [ ] `src/app/settings.tsx` - Settings screen with language, theme, notifications, and reset onboarding options
 
-### Screen Design System (HeroUI Native — REQUIRED)
-
-ALL screens MUST use **HeroUI Native** components as the primary design layer. Custom `StyleSheet`-based buttons, cards, badges, and inputs are **forbidden** — use HeroUI components with `className` (Tailwind via Uniwind) instead.
-
-| Need                | ✅ HeroUI Native                                | ❌ Never build manually                       |
-| ------------------- | ----------------------------------------------- | --------------------------------------------- |
-| Button / CTA        | `<Button>` from `heroui-native/button`          | `TouchableOpacity` + StyleSheet               |
-| Icon-only button    | `<Button isIconOnly>`                           | `TouchableOpacity` + rounded View             |
-| Card / content box  | `<Card>` `<CardBody>` from `heroui-native/card` | `View` + StyleSheet border/bg                 |
-| Badge / pill label  | `<Chip>` from `heroui-native/chip`              | `View` + `Text` + manual borderRadius         |
-| Divider / separator | `<Separator>` from `heroui-native/separator`    | `View` + hairlineWidth                        |
-| Loading indicator   | `<Button isLoading>` or `<Spinner>`             | `ActivityIndicator` inside TouchableOpacity   |
-| Toggle / switch     | `<Switch>` from `heroui-native/switch`          | `Switch` from `react-native`                  |
-| Settings list       | `<ListGroup>` from `heroui-native/list-group`   | Custom `FlatList` / `TouchableOpacity`        |
-| Toggle + label row  | `<ControlField>` + `<ControlField.Indicator>`   | `Switch` inline in random `View`              |
-| Section container   | `<Surface>` from `heroui-native/surface`        | `View` + StyleSheet background/shadow         |
-| Alert / feedback    | `<Alert>` or `useToast()` from `heroui-native`  | `Alert.alert()` (use only for system dialogs) |
-| Skeleton loading    | `<Skeleton>` from `heroui-native/skeleton`      | Manual opacity/animated placeholders          |
-
-**Layout** (flex, padding, margin, gap) and **backgrounds on full-screen containers** still use `className` (Tailwind) or minimal `StyleSheet`. Only `StyleSheet.absoluteFill`, video/gradient overlays, and pixel-precise native-only things fall back to StyleSheet.
 
 ### Onboarding Screen Implementation (REQUIRED)
 
@@ -48,10 +28,9 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { Button } from "heroui-native/button";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Dimensions, FlatList, StyleSheet, Text, View } from "react-native";
+import { Dimensions, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const VIDEO_SOURCE = require("@/assets/onboarding.mp4");
@@ -134,16 +113,14 @@ export default function OnboardingScreen() {
       <SafeAreaView style={styles.safeArea}>
         {/* Skip button */}
         <View style={styles.topBar}>
-          <Button
-            variant="ghost"
-            size="sm"
+          <TouchableOpacity
             onPress={handleComplete}
-            className="border border-white/25 bg-white/15 rounded-full px-4"
+            style={styles.skipButton}
           >
-            <Text className="text-white/85 text-sm font-semibold">
+            <Text style={styles.skipButtonText}>
               {t("onboarding.skip")}
             </Text>
-          </Button>
+          </TouchableOpacity>
         </View>
 
         {/* Slides */}
@@ -164,8 +141,10 @@ export default function OnboardingScreen() {
           renderItem={({ item }) => (
             <View style={styles.slide}>
               <View
-                className="w-24 h-24 rounded-full items-center justify-center mb-8"
                 style={{
+                  width: 96, height: 96, borderRadius: 48,
+                  alignItems: "center", justifyContent: "center",
+                  marginBottom: 32,
                   backgroundColor: "rgba(65,114,157,0.35)",
                   borderWidth: 1.5,
                   borderColor: "rgba(65,114,157,0.6)",
@@ -177,10 +156,10 @@ export default function OnboardingScreen() {
                   color="#FFFFFF"
                 />
               </View>
-              <Text className="text-4xl font-bold text-white text-center mb-4">
+              <Text style={styles.slideTitle}>
                 {t(item.titleKey)}
               </Text>
-              <Text className="text-lg text-white/75 text-center">
+              <Text style={styles.slideDesc}>
                 {t(item.descKey)}
               </Text>
             </View>
@@ -188,26 +167,25 @@ export default function OnboardingScreen() {
         />
 
         {/* Dots */}
-        <View className="flex-row justify-center gap-2 mb-6">
+        <View style={styles.dotsContainer}>
           {SLIDES.map((_, i) => (
             <View
               key={i}
-              className={`h-2 rounded-full ${i === activeIndex ? "w-6 bg-white" : "w-2 bg-white/30"}`}
+              style={[styles.dot, i === activeIndex ? styles.dotActive : styles.dotInactive]}
             />
           ))}
         </View>
 
         {/* CTA */}
-        <View className="px-6 pb-10">
-          <Button
-            size="lg"
+        <View style={styles.ctaContainer}>
+          <TouchableOpacity
             onPress={handleNext}
-            className="w-full rounded-2xl bg-primary"
+            style={styles.ctaButton}
           >
-            <Text className="text-white text-lg font-bold">
+            <Text style={styles.ctaButtonText}>
               {isLast ? t("onboarding.getStarted") : t("onboarding.next")}
             </Text>
-          </Button>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     </View>
@@ -230,6 +208,65 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 40,
   },
+  skipButton: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  skipButtonText: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  slideTitle: {
+    fontSize: 36,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  slideDesc: {
+    fontSize: 17,
+    color: "rgba(255,255,255,0.75)",
+    textAlign: "center",
+  },
+  dotsContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 24,
+  },
+  dot: {
+    height: 8,
+    borderRadius: 4,
+  },
+  dotActive: {
+    width: 24,
+    backgroundColor: "#FFFFFF",
+  },
+  dotInactive: {
+    width: 8,
+    backgroundColor: "rgba(255,255,255,0.3)",
+  },
+  ctaContainer: {
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+  },
+  ctaButton: {
+    width: "100%",
+    backgroundColor: "#6C63FF",
+    borderRadius: 16,
+    alignItems: "center",
+    paddingVertical: 16,
+  },
+  ctaButtonText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "700",
+  },
 });
 ```
 
@@ -249,7 +286,6 @@ const styles = StyleSheet.create({
 
 ```tsx
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { HeroUINativeProvider } from "heroui-native/provider";
 import { ThemeProvider } from "@/context/theme-context";
 import { PurchasesProvider } from "@/context/purchases-context";
 import {
@@ -259,21 +295,19 @@ import {
 } from "@react-navigation/native";
 
 <GestureHandlerRootView style={{ flex: 1 }}>
-  <HeroUINativeProvider>
-    <ThemeProvider>
-      <OnboardingProvider>
-        <PurchasesProvider>
-          <AdsProvider>
-            <NavigationThemeProvider
-              value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-            >
-              <Stack />
-            </NavigationThemeProvider>
-          </AdsProvider>
-        </PurchasesProvider>
-      </OnboardingProvider>
-    </ThemeProvider>
-  </HeroUINativeProvider>
+  <ThemeProvider>
+    <OnboardingProvider>
+      <PurchasesProvider>
+        <AdsProvider>
+          <NavigationThemeProvider
+            value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+          >
+            <Stack />
+          </NavigationThemeProvider>
+        </AdsProvider>
+      </PurchasesProvider>
+    </OnboardingProvider>
+  </ThemeProvider>
 </GestureHandlerRootView>;
 ```
 
@@ -286,13 +320,8 @@ Use `bun add` for non-Expo libraries:
 # Expo libraries
 npx expo install expo-iap expo-build-properties expo-tracking-transparency react-native-google-mobile-ads expo-notifications i18next react-i18next expo-localization react-native-reanimated expo-video expo-audio expo-sqlite expo-linear-gradient
 
-# HeroUI Native + Uniwind (Tailwind v4 for React Native)
-bun add heroui-native
-bun add uniwind tailwindcss
-
-# HeroUI Native peer dependencies
-npx expo install react-native-screens react-native-reanimated react-native-gesture-handler react-native-worklets react-native-safe-area-context react-native-svg
-bun add tailwind-variants tailwind-merge @gorhom/bottom-sheet
+# Peer dependencies
+npx expo install react-native-screens react-native-reanimated react-native-gesture-handler react-native-safe-area-context react-native-svg
 ```
 
 Libraries:
@@ -307,258 +336,7 @@ Libraries:
 - `expo-video` + `expo-audio`
 - `expo-sqlite` (for localStorage)
 - `expo-linear-gradient` (for gradient overlays)
-- `heroui-native` (UI component library)
-- `uniwind` + `tailwindcss` (Tailwind v4 styling for React Native)
 
-### HeroUI Native + Uniwind Setup (REQUIRED)
-
-> **IMPORTANT**: HeroUI Native uses **Uniwind** (Tailwind v4 for React Native) — NOT NativeWind. These two are incompatible. Always use Uniwind when HeroUI Native is in the project.
-
-#### Step 1 — metro.config.js
-
-```js
-const { getDefaultConfig } = require("expo/metro-config");
-const { withUniwindConfig } = require("uniwind/metro");
-
-const config = getDefaultConfig(__dirname);
-
-// withUniwindConfig MUST be the outermost wrapper
-module.exports = withUniwindConfig(config, {
-  cssEntryFile: "./src/global.css",
-});
-```
-
-#### Step 2 — global.css
-
-Create `src/global.css`:
-
-```css
-@import "tailwindcss";
-@import "uniwind";
-@import "heroui-native/styles";
-
-/* Path to heroui-native lib inside node_modules (relative to global.css) */
-/* If global.css is at src/: ../node_modules/heroui-native/lib */
-@source "../node_modules/heroui-native/lib";
-```
-
-#### Step 3 — Import global.css in \_layout.tsx
-
-```tsx
-import "../global.css"; // adjust path as needed
-```
-
-> **WARNING**: Do NOT import `global.css` in the root `index.ts`/`index.js` where you register the Root Component — import it somewhere inside `src/` to avoid full reloads instead of hot reloads.
-
-#### Step 4 — Wrap App with HeroUINativeProvider
-
-```tsx
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { HeroUINativeProvider } from "heroui-native";
-
-export default function RootLayout() {
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <HeroUINativeProvider>
-        {/* your existing providers + Stack */}
-      </HeroUINativeProvider>
-    </GestureHandlerRootView>
-  );
-}
-```
-
-#### HeroUI Native Granular Imports (RECOMMENDED for bundle size)
-
-```tsx
-// ✅ Granular imports — use when you need only a few components
-import { HeroUINativeProvider } from "heroui-native/provider";
-import { Button } from "heroui-native/button";
-import { Card } from "heroui-native/card";
-import { useToast } from "heroui-native/toast";
-
-// General import — use when many components are needed
-import { Button, Card, Switch } from "heroui-native";
-```
-
-> **IMPORTANT**: Mix granular and general imports consistently. Even one `import from "heroui-native"` (general) in the codebase breaks bundle optimization. Choose one approach and stick to it.
-
-#### withUniwind — Theme-Aware Styles on Third-Party Components
-
-Use `withUniwind` to add `className` support to components that don't natively support it (e.g., icon libraries, third-party inputs):
-
-```tsx
-import { withUniwind } from "uniwind";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-
-// Wrap ONCE at module level (NOT inside a component)
-const StyledIonicons = withUniwind(Ionicons);
-
-// Now use className for theme-aware colors
-<StyledIonicons name="settings" size={20} className="text-muted" />;
-
-// ⚠️ Do NOT wrap LinearGradient with withUniwind — gradient `colors` prop is an array
-// and withUniwind can't map className to array values.
-// For theme-aware gradient colors use useCSSVariable instead:
-import { useCSSVariable } from "uniwind";
-const [from, to] = useCSSVariable(["--color-accent", "--color-accent-soft"]);
-<LinearGradient colors={[from, to]} />;
-
-// ⚠️ Do NOT wrap react-native or react-native-reanimated components —
-// they already support className via Uniwind.
-```
-
-#### HeroUI Native Available Components
-
-| Category       | Components                                                                                                                               |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Buttons**    | `Button`, `CloseButton`                                                                                                                  |
-| **Controls**   | `Slider`, `Switch`                                                                                                                       |
-| **Forms**      | `Checkbox`, `ControlField`, `Description`, `FieldError`, `Input`, `InputOTP`, `Label`, `RadioGroup`, `SearchField`, `Select`, `Textarea` |
-| **Navigation** | `Accordion`, `ListGroup`, `Tabs`                                                                                                         |
-| **Overlays**   | `BottomSheet`, `Dialog`, `Popover`, `Toast`                                                                                              |
-| **Feedback**   | `Alert`, `Skeleton`, `SkeletonGroup`, `Spinner`                                                                                          |
-| **Layout**     | `Card`, `Separator`, `Surface`                                                                                                           |
-| **Media**      | `Avatar`                                                                                                                                 |
-| **Data**       | `Chip`                                                                                                                                   |
-| **Utilities**  | `PressableFeedback`, `ScrollShadow`                                                                                                      |
-
-#### HeroUI Native in Paywall Screen
-
-Use HeroUI Native components in the paywall for a polished UI:
-
-```tsx
-// Granular imports (recommended for bundle size)
-import { Button } from "heroui-native/button";
-import { Card } from "heroui-native/card";
-import { Chip } from "heroui-native/chip";
-
-// Subscription card — Card uses compound subcomponents (Card.Body, Card.Footer, etc.)
-// ❌ NO Card.Header — it does NOT exist in the API
-// ✅ Use Card.Body for content
-<Card className="border-2 border-primary">
-  <Card.Body>
-    <View className="flex-row items-center gap-2 mb-1">
-      <Chip variant="soft" color="success" size="sm">
-        <Chip.Label>50% OFF</Chip.Label>
-      </Chip>
-    </View>
-    <Text className="text-lg font-bold">Yearly Plan</Text>
-    <Text className="text-muted">$129.99/year</Text>
-  </Card.Body>
-</Card>
-
-// CTA Button — use variant= (not color=), use Button.Label for text content
-<Button
-  variant="primary"
-  size="lg"
-  className="w-full"
-  onPress={handlePurchase}
->
-  <Button.Label>Start Free Trial</Button.Label>
-</Button>
-
-// isLoading state (replaces ActivityIndicator inside button)
-<Button variant="primary" size="lg" isLoading={purchasing} onPress={handlePurchase}>
-  <Button.Label>Start Free Trial</Button.Label>
-</Button>
-```
-
-#### HeroUI Native in Settings Screen
-
-Settings rows come in two flavours — **toggle rows** (use `ControlField`) and **navigation rows** (use `ListGroup`):
-
-```tsx
-import { ControlField, Label, Description } from "heroui-native";
-import { ListGroup } from "heroui-native/list-group";
-import { Separator } from "heroui-native/separator";
-import { Surface } from "heroui-native/surface";
-
-// ✅ Toggle row — ControlField is the correct component (NOT ListGroup + endContent)
-// Switch prop is onSelectedChange (NOT onValueChange)
-<ControlField
-  isSelected={notificationsEnabled}
-  onSelectedChange={setNotificationsEnabled}
->
-  <View className="flex-1">
-    <Label>{t("settings.notifications")}</Label>
-    <Description>{t("settings.notificationsDesc")}</Description>
-  </View>
-  <ControlField.Indicator />
-</ControlField>
-
-// ✅ Navigation rows — ListGroup compound API (NO title= or endContent= shortcut props)
-<Surface variant="secondary" className="rounded-xl overflow-hidden">
-  <ListGroup>
-    <ListGroup.Item onPress={handleLanguage}>
-      <ListGroup.ItemContent>
-        <ListGroup.ItemTitle>{t("settings.language")}</ListGroup.ItemTitle>
-        <ListGroup.ItemDescription>{currentLanguage}</ListGroup.ItemDescription>
-      </ListGroup.ItemContent>
-      <ListGroup.ItemSuffix />
-    </ListGroup.Item>
-    <Separator className="mx-4" />
-    <ListGroup.Item onPress={handleTheme}>
-      <ListGroup.ItemContent>
-        <ListGroup.ItemTitle>{t("settings.theme")}</ListGroup.ItemTitle>
-      </ListGroup.ItemContent>
-      <ListGroup.ItemSuffix />
-    </ListGroup.Item>
-  </ListGroup>
-</Surface>
-```
-
-#### HeroUI Native Toast Usage
-
-```tsx
-import { useToast } from "heroui-native";
-
-function MyComponent() {
-  // ✅ hook returns { toast } — NOT { addToast }
-  const { toast } = useToast();
-
-  // Pattern 1: simple string
-  toast.show("Saved successfully");
-
-  // Pattern 2: config object
-  // ✅ use variant (NOT color), label (NOT title)
-  const handleSuccess = () => {
-    toast.show({
-      variant: "success", // accent | success | warning | danger
-      label: "Purchase Successful!",
-      description: "You are now a premium member.",
-      actionLabel: "Close",
-      onActionPress: ({ hide }) => hide(),
-    });
-  };
-
-  // Pattern 3: custom component
-  toast.show({
-    component: (props) => (
-      <Toast variant="accent" placement="top" {...props}>
-        <Toast.Title>Custom Toast</Toast.Title>
-        <Toast.Description>Fully custom layout</Toast.Description>
-        <Toast.Close />
-      </Toast>
-    ),
-  });
-}
-```
-
-#### Tailwind / Uniwind Class Usage
-
-With Uniwind, use Tailwind classes directly on React Native components:
-
-```tsx
-import { View, Text } from "react-native";
-
-// ✅ Works with Uniwind
-<View className="flex-1 bg-background items-center justify-center p-4">
-  <Text className="text-2xl font-bold text-foreground">Hello</Text>
-</View>;
-```
-
-HeroUI Native's theme tokens (e.g. `bg-background`, `text-foreground`, `border-primary`) are available automatically via the `@import 'heroui-native/styles'` in `global.css`.
 
 ### expo-iap Configuration (REQUIRED in app.json)
 
@@ -697,20 +475,7 @@ Example:
 - ❌ `expo-ads-admob` - Use `react-native-google-mobile-ads` instead
 - ❌ Any other ads library - ONLY use `react-native-google-mobile-ads`
 - ❌ Reanimated hooks inside callbacks - Call at component top level
-- ❌ `nativewind` - Use `uniwind` (Tailwind v4) instead when HeroUI Native is present
-- ❌ Mixing `nativewind` and `uniwind` in the same project - They are incompatible
 - ❌ `SafeAreaView` from `react-native` - Use `import { SafeAreaView } from 'react-native-safe-area-context'` instead
-- ❌ `TouchableOpacity` for buttons — use `<Button>` from `heroui-native/button`
-- ❌ Manual `View` + `StyleSheet` for cards / badges / list items — use `<Card>`, `<Chip>`, `<ListGroup>` from `heroui-native`
-- ❌ `ActivityIndicator` inside buttons — use `<Button isLoading>` from `heroui-native/button`
-- ❌ `Switch` from `react-native` — use `<Switch>` from `heroui-native/switch`
-- ❌ `Switch.onValueChange` prop — the correct prop is `onSelectedChange`
-- ❌ `ListGroup.Item title={...} endContent={...}` shortcut props — they don't exist; use the full compound structure: `<ListGroup.Item><ListGroup.ItemContent><ListGroup.ItemTitle>`, `<ListGroup.ItemSuffix />`
-- ❌ `Card.Header` — it does NOT exist in the HeroUI Native Card API; use `<Card.Body>` (compound subcomponent, not a named export `CardBody`)
-- ❌ `import { CardBody } from "heroui-native/card"` — no such named export; always `import { Card } from "heroui-native/card"` and use `<Card.Body>`
-- ❌ `Button color="primary"` — the prop is `variant`, not `color`; e.g. `variant="primary"`
-- ❌ `const { addToast } = useToast()` — the hook returns `{ toast }`; call `toast.show({ variant, label, description })`
-- ❌ `toast.show({ color: "success", title: "..." })` — use `variant` (not `color`) and `label` (not `title`)
 
 ### Reanimated Usage (IMPORTANT)
 
@@ -852,8 +617,6 @@ bunx create-expo -t default@next app-name
 
 - **Framework**: Expo, React Native
 - **Navigation**: Expo Router (file-based routing), NativeTabs
-- **UI Library**: HeroUI Native (`heroui-native`) — beautiful, modern components
-- **Styling**: Tailwind v4 via Uniwind (`uniwind`) — replaces NativeWind
 - **State Management**: React Context API
 - **Translations**: i18next, react-i18next
 - **Purchases**: expo-iap (expo-iap)
@@ -1513,10 +1276,6 @@ import { useIAP } from "expo-iap";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { Button } from "heroui-native/button";
-import { Card } from "heroui-native/card";
-import { Chip } from "heroui-native/chip";
-import { Separator } from "heroui-native/separator";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -1528,6 +1287,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -1650,21 +1410,18 @@ export default function PaywallScreen() {
 
       <SafeAreaView style={styles.safeArea}>
         {/* Top bar — close button */}
-        <View className="flex-row justify-end px-4 pt-2 pb-1">
-          <Button
-            isIconOnly
-            variant="light"
-            size="sm"
+        <View style={styles.topBar}>
+          <TouchableOpacity
             onPress={handleClose}
             testID="close-button"
-            className="rounded-full bg-white/10"
+            style={styles.closeButton}
           >
             <MaterialIcons
               name="close"
               size={18}
               color="rgba(255,255,255,0.7)"
             />
-          </Button>
+          </TouchableOpacity>
         </View>
 
         {/* Scrollable content */}
@@ -1690,90 +1447,60 @@ export default function PaywallScreen() {
           <Text style={styles.subtitle}>{t("paywall.subtitle")}</Text>
 
           {/* Features */}
-          <Card
-            className="w-full bg-white/5 border border-white/8 mb-5"
-            shadow="none"
-          >
-            <Card.Body className="p-0">
-              {FEATURES.map(({ key, icon }, i) => (
-                <View key={key}>
-                  <View className="flex-row items-center gap-3 px-4 py-3">
-                    <View className="w-8 h-8 rounded-lg bg-blue-600/20 items-center justify-center">
-                      <MaterialIcons name={icon} size={18} color="#60A5FA" />
-                    </View>
-                    <Text className="flex-1 text-white/85 text-sm font-medium">
-                      {t(key)}
-                    </Text>
-                    <MaterialIcons name="check" size={16} color="#34D399" />
+          <View style={styles.featuresCard}>
+            {FEATURES.map(({ key, icon }, i) => (
+              <View key={key}>
+                <View style={styles.featureRow}>
+                  <View style={styles.featureIconWrap}>
+                    <MaterialIcons name={icon} size={18} color="#60A5FA" />
                   </View>
-                  {i < FEATURES.length - 1 && (
-                    <Separator className="bg-white/8" />
-                  )}
+                  <Text style={styles.featureText}>
+                    {t(key)}
+                  </Text>
+                  <MaterialIcons name="check" size={16} color="#34D399" />
                 </View>
-              ))}
-            </Card.Body>
-          </Card>
+                {i < FEATURES.length - 1 && (
+                  <View style={styles.separator} />
+                )}
+              </View>
+            ))}
+          </View>
 
           {/* Plan selector — side by side */}
-          <View className="flex-row w-full gap-3">
+          <View style={styles.plansRow}>
             {/* Monthly */}
-            <Card
-              isPressable
+            <TouchableOpacity
               onPress={() => setSelectedPlan("monthly")}
-              shadow="none"
-              className={`flex-1 items-center py-4 ${
-                selectedPlan === "monthly"
-                  ? "border-2 border-blue-600 bg-blue-600/12"
-                  : "border border-white/12 bg-white/4"
-              }`}
+              style={[styles.planCard, selectedPlan === "monthly" ? styles.planCardSelected : styles.planCardIdle]}
             >
-              <Card.Body className="items-center gap-1 p-0">
-                {selectedPlan === "monthly" && (
-                  <View className="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-600" />
-                )}
-                <Text className="text-white/55 text-xs font-semibold uppercase tracking-widest">
-                  {t("paywall.monthly")}
-                </Text>
-                <Text className="text-white text-base font-bold text-center">
-                  {monthlyProduct?.displayPrice ?? t("paywall.monthlyPrice")}
-                </Text>
-              </Card.Body>
-            </Card>
+              {selectedPlan === "monthly" && (
+                <View style={styles.planDot} />
+              )}
+              <Text style={styles.planLabel}>{t("paywall.monthly")}</Text>
+              <Text style={styles.planPrice}>
+                {monthlyProduct?.displayPrice ?? t("paywall.monthlyPrice")}
+              </Text>
+            </TouchableOpacity>
 
             {/* Yearly */}
-            <Card
-              isPressable
-              onPress={() => setSelectedPlan("yearly")}
-              shadow="none"
-              className={`flex-1 items-center py-4 ${
-                selectedPlan === "yearly"
-                  ? "border-2 border-blue-600 bg-blue-600/12"
-                  : "border border-white/12 bg-white/4"
-              }`}
-            >
-              <Chip
-                size="sm"
-                className="absolute -top-3 self-center bg-amber-400"
+            <View style={styles.planCardWrap}>
+              <View style={styles.badgeWrap}>
+                <Text style={styles.badgeText}>{t("paywall.yearlyBadge")}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSelectedPlan("yearly")}
+                style={[styles.planCard, selectedPlan === "yearly" ? styles.planCardSelected : styles.planCardIdle]}
               >
-                <Chip.Label className="text-black font-black">
-                  {t("paywall.yearlyBadge")}
-                </Chip.Label>
-              </Chip>
-              <Card.Body className="items-center gap-1 p-0 mt-1">
                 {selectedPlan === "yearly" && (
-                  <View className="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-600" />
+                  <View style={styles.planDot} />
                 )}
-                <Text className="text-white/55 text-xs font-semibold uppercase tracking-widest">
-                  {t("paywall.yearly")}
-                </Text>
-                <Text className="text-white text-base font-bold text-center">
+                <Text style={styles.planLabel}>{t("paywall.yearly")}</Text>
+                <Text style={styles.planPrice}>
                   {yearlyProduct?.displayPrice ?? t("paywall.yearlyPrice")}
                 </Text>
-                <Text className="text-white/40 text-xs text-center">
-                  {t("paywall.yearlyPerWeek")}
-                </Text>
-              </Card.Body>
-            </Card>
+                <Text style={styles.planPerWeek}>{t("paywall.yearlyPerWeek")}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
 
@@ -1803,38 +1530,26 @@ export default function PaywallScreen() {
             </LinearGradient>
           </Pressable>
 
-          <Text className="text-white/30 text-xs text-center mb-2.5">
+          <Text style={styles.autoRenewText}>
             {t("paywall.autoRenew")}
           </Text>
 
-          <View className="flex-row items-center justify-center gap-1.5">
-            <Button
-              variant="light"
-              size="sm"
-              onPress={handleRestore}
-              isLoading={restoring}
-              className="text-white/40"
-            >
-              {t("paywall.restore")}
-            </Button>
-            <Text className="text-white/20 text-sm">·</Text>
-            <Button
-              variant="light"
-              size="sm"
-              onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
-              className="text-white/40 underline"
-            >
-              {t("paywall.terms")}
-            </Button>
-            <Text className="text-white/20 text-sm">·</Text>
-            <Button
-              variant="light"
-              size="sm"
-              onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
-              className="text-white/40 underline"
-            >
-              {t("paywall.privacy")}
-            </Button>
+          <View style={styles.linksRow}>
+            <TouchableOpacity onPress={handleRestore} disabled={restoring}>
+              {restoring ? (
+                <ActivityIndicator size="small" color="rgba(255,255,255,0.4)" />
+              ) : (
+                <Text style={styles.linkText}>{t("paywall.restore")}</Text>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.linkDot}>·</Text>
+            <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}>
+              <Text style={styles.linkText}>{t("paywall.terms")}</Text>
+            </TouchableOpacity>
+            <Text style={styles.linkDot}>·</Text>
+            <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}>
+              <Text style={styles.linkText}>{t("paywall.privacy")}</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </SafeAreaView>
@@ -1845,10 +1560,129 @@ export default function PaywallScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   safeArea: { flex: 1 },
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   scroll: {
     paddingHorizontal: 24,
     paddingBottom: 24,
     alignItems: "center",
+  },
+  featuresCard: {
+    width: "100%",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 14,
+    marginBottom: 20,
+    overflow: "hidden",
+  },
+  featureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  featureIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "rgba(37,99,235,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  featureText: {
+    flex: 1,
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    marginHorizontal: 16,
+  },
+  plansRow: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 12,
+  },
+  planCardWrap: {
+    flex: 1,
+    position: "relative",
+    marginTop: 12,
+  },
+  badgeWrap: {
+    position: "absolute",
+    top: -12,
+    alignSelf: "center",
+    backgroundColor: "#F59E0B",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    zIndex: 1,
+  },
+  badgeText: {
+    color: "#000",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  planCard: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  planCardSelected: {
+    borderWidth: 2,
+    borderColor: "#2563EB",
+    backgroundColor: "rgba(37,99,235,0.12)",
+  },
+  planCardIdle: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+  },
+  planDot: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#2563EB",
+  },
+  planLabel: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  planPrice: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  planPerWeek: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 11,
+    textAlign: "center",
   },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -1863,6 +1697,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 16,
+  },
+  autoRenewText: {
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 11,
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  linksRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  linkText: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 13,
+  },
+  linkDot: {
+    color: "rgba(255,255,255,0.2)",
+    fontSize: 14,
   },
 });
 ```
@@ -1936,19 +1790,19 @@ const handleResetOnboarding = async () => {
 ## Context Providers
 
 ```tsx
-<ThemeProvider>
-  <OnboardingProvider>
-    <PurchasesProvider>
-      {" "}
-      {/* ✅ App açılışında isPremium kontrol eder */}
-      <AdsProvider>
-        {" "}
-        {/* AdsProvider, isPremium'u PurchasesProvider'dan okur */}
-        <Stack />
-      </AdsProvider>
-    </PurchasesProvider>
-  </OnboardingProvider>
-</ThemeProvider>
+<GestureHandlerRootView style={{ flex: 1 }}>
+  <ThemeProvider>
+    <OnboardingProvider>
+      <PurchasesProvider>
+        {/* ✅ App açılışında isPremium kontrol eder */}
+        <AdsProvider>
+          {/* AdsProvider, isPremium'u PurchasesProvider'dan okur */}
+          <Stack />
+        </AdsProvider>
+      </PurchasesProvider>
+    </OnboardingProvider>
+  </ThemeProvider>
+</GestureHandlerRootView>
 ```
 
 ## useColorScheme Hook
