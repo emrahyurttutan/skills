@@ -1,13 +1,8 @@
----
-name: emrah-skills
-description: Expo React Native mobile app development with expo-iap in-app purchases, AdMob ads, i18n localization, ATT tracking transparency, optional OIDC authentication, onboarding flow, paywall, and NativeTabs navigation
----
-
 # Expo Mobile Application Development Guide
 
 > **IMPORTANT**: This is a SKILL file, NOT a project. NEVER run npm/bun install in this folder. NEVER create code files here. When creating a new project, ALWAYS ask the user for the project path first or create it in a separate directory (e.g., `~/Projects/app-name`).
 
-This guide is created to provide context when working with Expo projects using Claude Code.
+This guide is created to provide context when working with Expo projects using GitHub Copilot.
 
 ## MANDATORY REQUIREMENTS
 
