@@ -15,7 +15,6 @@ When creating a new Expo project, you MUST include ALL of the following:
 - [ ] `src/app/paywall.tsx` - expo-iap paywall screen (shown after onboarding)
 - [ ] `src/app/settings.tsx` - Settings screen with language, theme, notifications, and reset onboarding options
 
-
 ### Onboarding Screen Implementation (REQUIRED)
 
 The onboarding screen MUST have a fullscreen background video. Use a **local asset** (`require("@/assets/...")`). The video is looped, muted, and played automatically.
@@ -30,7 +29,14 @@ import { router } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Dimensions, FlatList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Dimensions,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const VIDEO_SOURCE = require("@/assets/onboarding.mp4");
@@ -113,13 +119,8 @@ export default function OnboardingScreen() {
       <SafeAreaView style={styles.safeArea}>
         {/* Skip button */}
         <View style={styles.topBar}>
-          <TouchableOpacity
-            onPress={handleComplete}
-            style={styles.skipButton}
-          >
-            <Text style={styles.skipButtonText}>
-              {t("onboarding.skip")}
-            </Text>
+          <TouchableOpacity onPress={handleComplete} style={styles.skipButton}>
+            <Text style={styles.skipButtonText}>{t("onboarding.skip")}</Text>
           </TouchableOpacity>
         </View>
 
@@ -142,8 +143,11 @@ export default function OnboardingScreen() {
             <View style={styles.slide}>
               <View
                 style={{
-                  width: 96, height: 96, borderRadius: 48,
-                  alignItems: "center", justifyContent: "center",
+                  width: 96,
+                  height: 96,
+                  borderRadius: 48,
+                  alignItems: "center",
+                  justifyContent: "center",
                   marginBottom: 32,
                   backgroundColor: "rgba(65,114,157,0.35)",
                   borderWidth: 1.5,
@@ -156,12 +160,8 @@ export default function OnboardingScreen() {
                   color="#FFFFFF"
                 />
               </View>
-              <Text style={styles.slideTitle}>
-                {t(item.titleKey)}
-              </Text>
-              <Text style={styles.slideDesc}>
-                {t(item.descKey)}
-              </Text>
+              <Text style={styles.slideTitle}>{t(item.titleKey)}</Text>
+              <Text style={styles.slideDesc}>{t(item.descKey)}</Text>
             </View>
           )}
         />
@@ -171,17 +171,17 @@ export default function OnboardingScreen() {
           {SLIDES.map((_, i) => (
             <View
               key={i}
-              style={[styles.dot, i === activeIndex ? styles.dotActive : styles.dotInactive]}
+              style={[
+                styles.dot,
+                i === activeIndex ? styles.dotActive : styles.dotInactive,
+              ]}
             />
           ))}
         </View>
 
         {/* CTA */}
         <View style={styles.ctaContainer}>
-          <TouchableOpacity
-            onPress={handleNext}
-            style={styles.ctaButton}
-          >
+          <TouchableOpacity onPress={handleNext} style={styles.ctaButton}>
             <Text style={styles.ctaButtonText}>
               {isLast ? t("onboarding.getStarted") : t("onboarding.next")}
             </Text>
@@ -337,7 +337,6 @@ Libraries:
 - `expo-sqlite` (for localStorage)
 - `expo-linear-gradient` (for gradient overlays)
 
-
 ### expo-iap Configuration (REQUIRED in app.json)
 
 You MUST add this to `app.json` for expo-iap to work (Expo SDK 53+):
@@ -384,28 +383,292 @@ For development/testing, use test App IDs:
 
 Do NOT skip this configuration or the app will crash with `GADInvalidInitializationException`.
 
-### Banner Ad Implementation (REQUIRED)
+### Ad Strategy (Revenue-Optimised, UX-Friendly)
 
-You MUST implement banner ads in the Tab layout. Use this pattern:
+Use all five AdMob formats for maximum revenue with minimal UX friction:
+
+| Format           | Trigger                             | Cooldown              | Premium Hidden |
+| ---------------- | ----------------------------------- | --------------------- | -------------- |
+| **App Open**     | App foreground (after first launch) | 4 hours               | ✅             |
+| **Banner**       | Tab bar, always visible             | None                  | ✅             |
+| **Native**       | In-feed, every 5 items in FlatList  | None                  | ✅             |
+| **Interstitial** | After key user action               | 3 minutes / max 3/day | ✅             |
+| **Rewarded**     | User-initiated, for a benefit       | User-triggered        | ✅             |
+
+All ad formats are **hidden for premium users** via `shouldShowAds`.
+
+#### AdsProvider Implementation (REQUIRED)
+
+Create `src/context/ads-context.tsx`:
+
+```tsx
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { AppState, AppStateStatus } from "react-native";
+import {
+  AdEventType,
+  AppOpenAd,
+  InterstitialAd,
+  RewardedAd,
+  RewardedAdEventType,
+  TestIds,
+} from "react-native-google-mobile-ads";
+import { usePurchases } from "@/context/purchases-context";
+import "expo-sqlite/localStorage/install";
+
+// ── Ad Unit IDs ──────────────────────────────────────────────
+export const AD_UNITS = {
+  banner: __DEV__ ? TestIds.BANNER : "ca-app-pub-xxxxxxxxxxxxxxxx/BANNER_ID",
+  interstitial: __DEV__
+    ? TestIds.INTERSTITIAL
+    : "ca-app-pub-xxxxxxxxxxxxxxxx/INTERSTITIAL_ID",
+  rewarded: __DEV__
+    ? TestIds.REWARDED
+    : "ca-app-pub-xxxxxxxxxxxxxxxx/REWARDED_ID",
+  appOpen: __DEV__
+    ? TestIds.APP_OPEN
+    : "ca-app-pub-xxxxxxxxxxxxxxxx/APP_OPEN_ID",
+  native: __DEV__ ? TestIds.NATIVE : "ca-app-pub-xxxxxxxxxxxxxxxx/NATIVE_ID",
+};
+
+// ── Constants ────────────────────────────────────────────────
+const APP_OPEN_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
+const INTERSTITIAL_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
+const INTERSTITIAL_DAILY_CAP = 3;
+
+const LS_APP_OPEN_KEY = "ads_app_open_last_shown";
+const LS_INTER_DATE_KEY = "ads_inter_last_date";
+const LS_INTER_COUNT_KEY = "ads_inter_count_today";
+const LS_INTER_TS_KEY = "ads_inter_last_ts";
+
+function todayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ── Context ──────────────────────────────────────────────────
+interface AdsContextValue {
+  shouldShowAds: boolean;
+  bannerAdUnitId: string;
+  nativeAdUnitId: string;
+  showInterstitial: () => void;
+  showRewarded: () => Promise<boolean>;
+}
+
+const AdsContext = createContext<AdsContextValue>({
+  shouldShowAds: true,
+  bannerAdUnitId: AD_UNITS.banner,
+  nativeAdUnitId: AD_UNITS.native,
+  showInterstitial: () => {},
+  showRewarded: async () => false,
+});
+
+export function AdsProvider({ children }: { children: React.ReactNode }) {
+  const { isPremium } = usePurchases();
+  const shouldShowAds = !isPremium;
+
+  // ── App Open ─────────────────────────────────────────────
+  const appOpenAdRef = useRef<AppOpenAd | null>(null);
+  const appOpenLoadedRef = useRef(false);
+  const isFirstLaunchRef = useRef(true);
+
+  const loadAppOpen = useCallback(() => {
+    if (!shouldShowAds) return;
+    const ad = AppOpenAd.createForAdRequest(AD_UNITS.appOpen, {
+      requestNonPersonalizedAdsOnly: true,
+    });
+    ad.addEventHandler(AdEventType.LOADED, () => {
+      appOpenLoadedRef.current = true;
+    });
+    ad.addEventHandler(AdEventType.CLOSED, () => {
+      appOpenLoadedRef.current = false;
+      appOpenAdRef.current = null;
+      loadAppOpen();
+    });
+    ad.addEventHandler(AdEventType.ERROR, () => {
+      appOpenLoadedRef.current = false;
+      setTimeout(loadAppOpen, 30_000);
+    });
+    ad.load();
+    appOpenAdRef.current = ad;
+  }, [shouldShowAds]);
+
+  const tryShowAppOpen = useCallback(() => {
+    if (!shouldShowAds || !appOpenLoadedRef.current || !appOpenAdRef.current)
+      return;
+    // Skip on first cold launch
+    if (isFirstLaunchRef.current) {
+      isFirstLaunchRef.current = false;
+      return;
+    }
+    const lastShown = globalThis.localStorage.getItem(LS_APP_OPEN_KEY);
+    const now = Date.now();
+    if (lastShown && now - parseInt(lastShown, 10) < APP_OPEN_COOLDOWN_MS)
+      return;
+    globalThis.localStorage.setItem(LS_APP_OPEN_KEY, String(now));
+    appOpenAdRef.current.show().catch(() => loadAppOpen());
+  }, [shouldShowAds, loadAppOpen]);
+
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+
+  useEffect(() => {
+    if (!shouldShowAds) return;
+    loadAppOpen();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (appStateRef.current !== "active" && state === "active") {
+        tryShowAppOpen();
+      }
+      appStateRef.current = state;
+    });
+    return () => sub.remove();
+  }, [shouldShowAds, loadAppOpen, tryShowAppOpen]);
+
+  // ── Interstitial ──────────────────────────────────────────
+  const interstitialRef = useRef<InterstitialAd | null>(null);
+  const interstitialLoadedRef = useRef(false);
+
+  const loadInterstitial = useCallback(() => {
+    if (!shouldShowAds) return;
+    const ad = InterstitialAd.createForAdRequest(AD_UNITS.interstitial, {
+      requestNonPersonalizedAdsOnly: true,
+    });
+    ad.addEventHandler(AdEventType.LOADED, () => {
+      interstitialLoadedRef.current = true;
+    });
+    ad.addEventHandler(AdEventType.CLOSED, () => {
+      interstitialLoadedRef.current = false;
+      interstitialRef.current = null;
+      loadInterstitial();
+    });
+    ad.addEventHandler(AdEventType.ERROR, () => {
+      interstitialLoadedRef.current = false;
+    });
+    ad.load();
+    interstitialRef.current = ad;
+  }, [shouldShowAds]);
+
+  useEffect(() => {
+    if (shouldShowAds) loadInterstitial();
+  }, [shouldShowAds, loadInterstitial]);
+
+  const showInterstitial = useCallback(() => {
+    if (
+      !shouldShowAds ||
+      !interstitialLoadedRef.current ||
+      !interstitialRef.current
+    )
+      return;
+    const now = Date.now();
+    const today = todayDateString();
+    const lastDate = globalThis.localStorage.getItem(LS_INTER_DATE_KEY);
+    let countToday = parseInt(
+      globalThis.localStorage.getItem(LS_INTER_COUNT_KEY) ?? "0",
+      10,
+    );
+    if (lastDate !== today) {
+      countToday = 0;
+      globalThis.localStorage.setItem(LS_INTER_DATE_KEY, today);
+    }
+    if (countToday >= INTERSTITIAL_DAILY_CAP) return;
+    const lastTs = parseInt(
+      globalThis.localStorage.getItem(LS_INTER_TS_KEY) ?? "0",
+      10,
+    );
+    if (now - lastTs < INTERSTITIAL_COOLDOWN_MS) return;
+    globalThis.localStorage.setItem(LS_INTER_TS_KEY, String(now));
+    globalThis.localStorage.setItem(LS_INTER_COUNT_KEY, String(countToday + 1));
+    interstitialRef.current.show().catch(() => loadInterstitial());
+  }, [shouldShowAds, loadInterstitial]);
+
+  // ── Rewarded ──────────────────────────────────────────────
+  const rewardedRef = useRef<RewardedAd | null>(null);
+  const rewardedLoadedRef = useRef(false);
+
+  const loadRewarded = useCallback(() => {
+    if (!shouldShowAds) return;
+    const ad = RewardedAd.createForAdRequest(AD_UNITS.rewarded, {
+      requestNonPersonalizedAdsOnly: true,
+    });
+    ad.addEventHandler(RewardedAdEventType.LOADED, () => {
+      rewardedLoadedRef.current = true;
+    });
+    ad.addEventHandler(AdEventType.CLOSED, () => {
+      rewardedLoadedRef.current = false;
+      rewardedRef.current = null;
+      loadRewarded();
+    });
+    ad.addEventHandler(AdEventType.ERROR, () => {
+      rewardedLoadedRef.current = false;
+    });
+    ad.load();
+    rewardedRef.current = ad;
+  }, [shouldShowAds]);
+
+  useEffect(() => {
+    if (shouldShowAds) loadRewarded();
+  }, [shouldShowAds, loadRewarded]);
+
+  const showRewarded = useCallback((): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (
+        !shouldShowAds ||
+        !rewardedLoadedRef.current ||
+        !rewardedRef.current
+      ) {
+        resolve(false);
+        return;
+      }
+      const ad = rewardedRef.current!;
+      let rewarded = false;
+      ad.addEventHandler(RewardedAdEventType.EARNED_REWARD, () => {
+        rewarded = true;
+      });
+      ad.addEventHandler(AdEventType.CLOSED, () => {
+        resolve(rewarded);
+      });
+      ad.show().catch(() => resolve(false));
+    });
+  }, [shouldShowAds]);
+
+  return (
+    <AdsContext.Provider
+      value={{
+        shouldShowAds,
+        bannerAdUnitId: AD_UNITS.banner,
+        nativeAdUnitId: AD_UNITS.native,
+        showInterstitial,
+        showRewarded,
+      }}
+    >
+      {children}
+    </AdsContext.Provider>
+  );
+}
+
+export function useAds() {
+  return useContext(AdsContext);
+}
+```
+
+#### Banner Ad (Tab Layout)
+
+Place the banner below `NativeTabs` in `src/app/(tabs)/_layout.tsx`:
 
 ```tsx
 import { View, StyleSheet } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { useTranslation } from "react-i18next";
-import {
-  BannerAd,
-  BannerAdSize,
-  TestIds,
-} from "react-native-google-mobile-ads";
+import { BannerAd, BannerAdSize } from "react-native-google-mobile-ads";
 import { useAds } from "@/context/ads-context";
-
-const adUnitId = __DEV__
-  ? TestIds.BANNER
-  : "ca-app-pub-xxxxxxxxxxxxxxxx/yyyyyyyyyy";
 
 export default function TabLayout() {
   const { t } = useTranslation();
-  const { shouldShowAds } = useAds();
+  const { shouldShowAds, bannerAdUnitId } = useAds();
 
   return (
     <View style={styles.container}>
@@ -425,11 +688,9 @@ export default function TabLayout() {
       {shouldShowAds && (
         <View style={styles.adContainer}>
           <BannerAd
-            unitId={adUnitId}
+            unitId={bannerAdUnitId}
             size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-            requestOptions={{
-              requestNonPersonalizedAdsOnly: true,
-            }}
+            requestOptions={{ requestNonPersonalizedAdsOnly: true }}
           />
         </View>
       )}
@@ -438,19 +699,205 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1 },
+  adContainer: { alignItems: "center", paddingBottom: 10 },
+});
+```
+
+#### App Open Ad
+
+`AdsProvider` handles App Open automatically via `AppState` listener. No extra setup is needed in screens.
+
+```
+First cold launch → NO App Open (avoids jarring first impression)
+foreground return → App Open shown only if ≥ 4 hours since last shown
+```
+
+- The 4-hour timestamp is stored in `localStorage` under `ads_app_open_last_shown`
+- `isFirstLaunchRef` ensures the ad never fires on the initial cold open
+- After `AdsProvider` mounts, the App Open ad is preloaded silently and auto-reloaded after each show
+
+#### Interstitial Usage Pattern
+
+Call `showInterstitial()` from `useAds()` **after** a meaningful user action. Cooldown (3 min) and daily cap (3/day) are enforced automatically — just call it freely at good breakpoints.
+
+```tsx
+import { useAds } from "@/context/ads-context";
+
+function SomeScreen() {
+  const { showInterstitial } = useAds();
+
+  const handleActionComplete = async () => {
+    await doSomething();
+    showInterstitial(); // fire-and-forget, respects cooldown + cap
+  };
+}
+```
+
+**Good trigger points:** after completing a level / generating content / sharing a result
+
+**Avoid:** on screen mount, during navigation, mid-form, or on back press
+
+#### Native Ad (In-Feed)
+
+Create `src/components/ads/NativeAdCard.tsx`:
+
+```tsx
+import { View, Text, StyleSheet } from "react-native";
+import {
+  NativeAd,
+  NativeAdView,
+  HeadlineView,
+  BodyView,
+  CallToActionView,
+  AdvertiserView,
+} from "react-native-google-mobile-ads";
+import { useEffect, useState } from "react";
+import { useAds } from "@/context/ads-context";
+
+export function NativeAdCard() {
+  const { nativeAdUnitId, shouldShowAds } = useAds();
+  const [nativeAd, setNativeAd] = useState<NativeAd | null>(null);
+
+  useEffect(() => {
+    if (!shouldShowAds) return;
+    const ad = new NativeAd(nativeAdUnitId);
+    ad.load()
+      .then(() => setNativeAd(ad))
+      .catch(() => {});
+    return () => ad.destroy();
+  }, [shouldShowAds, nativeAdUnitId]);
+
+  if (!nativeAd || !shouldShowAds) return null;
+
+  return (
+    <NativeAdView nativeAd={nativeAd} style={styles.container}>
+      <View style={styles.badge}>
+        <Text style={styles.badgeText}>Ad</Text>
+      </View>
+      <AdvertiserView style={styles.advertiser} />
+      <HeadlineView style={styles.headline} />
+      <BodyView style={styles.body} />
+      <CallToActionView style={styles.cta} />
+    </NativeAdView>
+  );
+}
+
+const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 14,
+    marginHorizontal: 16,
+    marginVertical: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  adContainer: {
-    alignItems: "center",
-    paddingBottom: 10,
+  badge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F59E0B",
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginBottom: 6,
+  },
+  badgeText: { color: "#000", fontSize: 10, fontWeight: "700" },
+  advertiser: { color: "rgba(255,255,255,0.4)", fontSize: 11 },
+  headline: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+    marginVertical: 4,
+  },
+  body: { color: "rgba(255,255,255,0.65)", fontSize: 13 },
+  cta: {
+    marginTop: 10,
+    backgroundColor: "#2563EB",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignSelf: "flex-start",
+    overflow: "hidden",
   },
 });
 ```
 
-- ALWAYS use `TestIds.BANNER` in development
-- Banner ad is placed below NativeTabs in the Tab layout
-- Use `useAds` context to check `shouldShowAds` (hides for premium users)
+**Inject into FlatList every 5 items:**
+
+```tsx
+import { NativeAdCard } from "@/components/ads/NativeAdCard";
+import { useAds } from "@/context/ads-context";
+import { useMemo } from "react";
+
+const NATIVE_AD_INTERVAL = 5;
+
+function MyListScreen() {
+  const { shouldShowAds } = useAds();
+
+  const listData = useMemo(() => {
+    if (!shouldShowAds)
+      return items.map((item) => ({ type: "item" as const, item }));
+    return items.flatMap((item, i) => {
+      const result: any[] = [{ type: "item", item }];
+      if ((i + 1) % NATIVE_AD_INTERVAL === 0) {
+        result.push({ type: "native_ad", key: `ad_${i}` });
+      }
+      return result;
+    });
+  }, [items, shouldShowAds]);
+
+  return (
+    <FlatList
+      data={listData}
+      keyExtractor={(entry) =>
+        entry.type === "item" ? entry.item.id : entry.key
+      }
+      renderItem={({ item: entry }) =>
+        entry.type === "native_ad" ? (
+          <NativeAdCard />
+        ) : (
+          <MyItemComponent item={entry.item} />
+        )
+      }
+    />
+  );
+}
+```
+
+#### Rewarded Ad Usage Pattern
+
+```tsx
+import { useAds } from "@/context/ads-context";
+
+function SomeScreen() {
+  const { showRewarded } = useAds();
+
+  const handleWatchAd = async () => {
+    const earned = await showRewarded();
+    if (earned) {
+      unlockPremiumContent(); // grant the reward
+    }
+  };
+}
+```
+
+**Good use-cases:** skip a waiting period, unlock a single feature temporarily, grant extra credits/attempts
+
+#### Ad Unit ID Configuration
+
+Replace the placeholder IDs in `AD_UNITS` inside `src/context/ads-context.tsx`:
+
+| Format       | Constant                | AdMob Console Location            |
+| ------------ | ----------------------- | --------------------------------- |
+| Banner       | `AD_UNITS.banner`       | Apps → Ad units → Banner          |
+| Interstitial | `AD_UNITS.interstitial` | Apps → Ad units → Interstitial    |
+| Rewarded     | `AD_UNITS.rewarded`     | Apps → Ad units → Rewarded        |
+| App Open     | `AD_UNITS.appOpen`      | Apps → Ad units → App open        |
+| Native       | `AD_UNITS.native`       | Apps → Ad units → Native advanced |
+
+- ALWAYS use `TestIds.*` in `__DEV__` to avoid policy violations
+- `shouldShowAds = !isPremium` — all formats hidden for premium users
+- `AdsProvider` must be nested **inside** `PurchasesProvider`
 
 ### TURKISH LOCALIZATION (IMPORTANT)
 
@@ -934,9 +1381,14 @@ router.replace("/(tabs)");
 
 ### AdMob
 
-- File: `src/lib/ads.ts`
-- Ads disabled for premium users
-- Test IDs must be used in development
+- File: `src/context/ads-context.tsx`
+- Manages all 5 ad formats: App Open, Banner, Native, Interstitial, Rewarded
+- App Open fires on foreground return with 4-hour cooldown (skipped on first cold launch)
+- Interstitial: 3-minute cooldown, max 3/day — enforced automatically via `localStorage`
+- Rewarded: resolves `Promise<boolean>` — `true` if user earned the reward
+- All ads hidden for premium users via `shouldShowAds = !isPremium`
+- Always use `TestIds.*` in `__DEV__` to avoid policy violations
+- `AdsProvider` must be nested **inside** `PurchasesProvider` in `_layout.tsx`
 
 ### ATT / Tracking Transparency (iOS Only)
 
@@ -1454,14 +1906,10 @@ export default function PaywallScreen() {
                   <View style={styles.featureIconWrap}>
                     <MaterialIcons name={icon} size={18} color="#60A5FA" />
                   </View>
-                  <Text style={styles.featureText}>
-                    {t(key)}
-                  </Text>
+                  <Text style={styles.featureText}>{t(key)}</Text>
                   <MaterialIcons name="check" size={16} color="#34D399" />
                 </View>
-                {i < FEATURES.length - 1 && (
-                  <View style={styles.separator} />
-                )}
+                {i < FEATURES.length - 1 && <View style={styles.separator} />}
               </View>
             ))}
           </View>
@@ -1471,11 +1919,14 @@ export default function PaywallScreen() {
             {/* Monthly */}
             <TouchableOpacity
               onPress={() => setSelectedPlan("monthly")}
-              style={[styles.planCard, selectedPlan === "monthly" ? styles.planCardSelected : styles.planCardIdle]}
+              style={[
+                styles.planCard,
+                selectedPlan === "monthly"
+                  ? styles.planCardSelected
+                  : styles.planCardIdle,
+              ]}
             >
-              {selectedPlan === "monthly" && (
-                <View style={styles.planDot} />
-              )}
+              {selectedPlan === "monthly" && <View style={styles.planDot} />}
               <Text style={styles.planLabel}>{t("paywall.monthly")}</Text>
               <Text style={styles.planPrice}>
                 {monthlyProduct?.displayPrice ?? t("paywall.monthlyPrice")}
@@ -1489,16 +1940,21 @@ export default function PaywallScreen() {
               </View>
               <TouchableOpacity
                 onPress={() => setSelectedPlan("yearly")}
-                style={[styles.planCard, selectedPlan === "yearly" ? styles.planCardSelected : styles.planCardIdle]}
+                style={[
+                  styles.planCard,
+                  selectedPlan === "yearly"
+                    ? styles.planCardSelected
+                    : styles.planCardIdle,
+                ]}
               >
-                {selectedPlan === "yearly" && (
-                  <View style={styles.planDot} />
-                )}
+                {selectedPlan === "yearly" && <View style={styles.planDot} />}
                 <Text style={styles.planLabel}>{t("paywall.yearly")}</Text>
                 <Text style={styles.planPrice}>
                   {yearlyProduct?.displayPrice ?? t("paywall.yearlyPrice")}
                 </Text>
-                <Text style={styles.planPerWeek}>{t("paywall.yearlyPerWeek")}</Text>
+                <Text style={styles.planPerWeek}>
+                  {t("paywall.yearlyPerWeek")}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1530,9 +1986,7 @@ export default function PaywallScreen() {
             </LinearGradient>
           </Pressable>
 
-          <Text style={styles.autoRenewText}>
-            {t("paywall.autoRenew")}
-          </Text>
+          <Text style={styles.autoRenewText}>{t("paywall.autoRenew")}</Text>
 
           <View style={styles.linksRow}>
             <TouchableOpacity onPress={handleRestore} disabled={restoring}>
@@ -1543,11 +1997,15 @@ export default function PaywallScreen() {
               )}
             </TouchableOpacity>
             <Text style={styles.linkDot}>·</Text>
-            <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}>
+            <TouchableOpacity
+              onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
+            >
               <Text style={styles.linkText}>{t("paywall.terms")}</Text>
             </TouchableOpacity>
             <Text style={styles.linkDot}>·</Text>
-            <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}>
+            <TouchableOpacity
+              onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
+            >
               <Text style={styles.linkText}>{t("paywall.privacy")}</Text>
             </TouchableOpacity>
           </View>
