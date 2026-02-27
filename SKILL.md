@@ -2800,8 +2800,13 @@ Maestro is an open-source mobile UI testing framework using YAML flow files. Aft
 
 ### Installation
 
+> **SECURITY NOTE**: Do NOT pipe remote scripts directly to `bash`. Download first, inspect, then execute.
+
 ```bash
-curl -fsSL "https://get.maestro.mobile.dev" | bash
+# Safe two-step install (download, review, then execute)
+curl -fsSL "https://get.maestro.mobile.dev" -o install-maestro.sh
+# Optionally inspect: cat install-maestro.sh
+bash install-maestro.sh
 maestro --version   # requires Java 17+
 ```
 
@@ -3054,7 +3059,9 @@ jobs:
 
       - name: Install Maestro
         run: |
-          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          # Download first, then execute (avoids curl|bash anti-pattern)
+          curl -fsSL "https://get.maestro.mobile.dev" -o install-maestro.sh
+          bash install-maestro.sh
           echo "$HOME/.maestro/bin" >> $GITHUB_PATH
 
       - name: Enable KVM (Android emulator acceleration)
@@ -3134,7 +3141,9 @@ jobs:
 
       - name: Install Maestro
         run: |
-          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          # Download first, then execute (avoids curl|bash anti-pattern)
+          curl -fsSL "https://get.maestro.mobile.dev" -o install-maestro.sh
+          bash install-maestro.sh
           echo "$HOME/.maestro/bin" >> $GITHUB_PATH
 
       - name: Select Xcode
