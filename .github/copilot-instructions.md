@@ -1973,15 +1973,19 @@ export default function PaywallScreen() {
 
           <Text style={styles.autoRenewText}>{t("paywall.autoRenew")}</Text>
 
+          <TouchableOpacity
+            onPress={handleRestore}
+            disabled={restoring}
+            style={styles.restoreRow}
+          >
+            {restoring ? (
+              <ActivityIndicator size="small" color="rgba(255,255,255,0.4)" />
+            ) : (
+              <Text style={styles.linkText}>{t("paywall.restore")}</Text>
+            )}
+          </TouchableOpacity>
+
           <View style={styles.linksRow}>
-            <TouchableOpacity onPress={handleRestore} disabled={restoring}>
-              {restoring ? (
-                <ActivityIndicator size="small" color="rgba(255,255,255,0.4)" />
-              ) : (
-                <Text style={styles.linkText}>{t("paywall.restore")}</Text>
-              )}
-            </TouchableOpacity>
-            <Text style={styles.linkDot}>·</Text>
             <TouchableOpacity
               onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
             >
@@ -2145,7 +2149,13 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.3)",
     fontSize: 11,
     textAlign: "center",
-    marginBottom: 10,
+    marginBottom: 8,
+  },
+  restoreRow: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 4,
+    marginBottom: 8,
   },
   linksRow: {
     flexDirection: "row",
