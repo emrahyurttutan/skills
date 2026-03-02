@@ -3005,13 +3005,11 @@ Maestro is an open-source mobile UI testing framework using YAML flow files. Aft
 
 ### Installation
 
-> **SECURITY NOTE**: Do NOT pipe remote scripts directly to `bash`. Download first, inspect, then execute.
+> **SECURITY NOTE**: Never execute remote scripts directly. Use a package manager instead.
 
 ```bash
-# Safe two-step install (download, review, then execute)
-curl -fsSL "https://get.maestro.mobile.dev" -o install-maestro.sh
-# Optionally inspect: cat install-maestro.sh
-bash install-maestro.sh
+# Install via Homebrew (recommended — no remote script execution)
+brew install maestro
 maestro --version   # requires Java 17+
 ```
 
@@ -3238,6 +3236,9 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
   e2e-android:
     runs-on: ubuntu-latest
@@ -3245,16 +3246,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           java-version: "17"
           distribution: "temurin"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: "npm"
@@ -3263,11 +3264,14 @@ jobs:
         run: npm install
 
       - name: Install Maestro
+        env:
+          MAESTRO_VERSION: "1.40.0"
         run: |
-          # Download first, then execute (avoids curl|bash anti-pattern)
-          curl -fsSL "https://get.maestro.mobile.dev" -o install-maestro.sh
-          bash install-maestro.sh
-          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+          # Install pinned version from GitHub releases — no remote script execution
+          curl -fsSL "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip" \
+            -o maestro.zip
+          unzip maestro.zip -d $HOME
+          echo "$HOME/maestro/bin" >> $GITHUB_PATH
 
       - name: Enable KVM (Android emulator acceleration)
         run: |
@@ -3279,7 +3283,7 @@ jobs:
         run: npx expo prebuild --platform android --non-interactive
 
       - name: Run Android E2E Tests
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@b530d96654c385303d652368551fb075bc2f0b6b # v2
         with:
           api-level: 33
           arch: x86_64
@@ -3294,7 +3298,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: maestro-android-results
           path: |
@@ -3303,7 +3307,7 @@ jobs:
 
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: maestro-android-screenshots
           path: ~/.maestro/tests/**/*.png
@@ -3320,6 +3324,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   e2e-ios:
     runs-on: macos-15
@@ -3327,16 +3334,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Java 17 (required by Maestro)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           java-version: "17"
           distribution: "temurin"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: "npm"
@@ -3345,11 +3352,7 @@ jobs:
         run: npm install
 
       - name: Install Maestro
-        run: |
-          # Download first, then execute (avoids curl|bash anti-pattern)
-          curl -fsSL "https://get.maestro.mobile.dev" -o install-maestro.sh
-          bash install-maestro.sh
-          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
+        run: brew install maestro  # macOS runner — no remote script execution
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app
@@ -3386,7 +3389,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: maestro-ios-results
           path: |
@@ -3395,7 +3398,7 @@ jobs:
 
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: maestro-ios-screenshots
           path: ~/.maestro/tests/**/*.png
