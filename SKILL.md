@@ -1256,8 +1256,8 @@ import React, {
 
 // Replace these SKUs with the app's actual product IDs
 const SUBSCRIPTION_SKUS = [
-  "com.company.appname.monthly",
-  "com.company.appname.yearly",
+  Platform.OS === "ios" ? "com.company.appname.monthly" : "abonelik",
+  Platform.OS === "ios" ? "com.company.appname.yearly" : "abonelik",
 ];
 
 interface PurchasesContextValue {
@@ -1712,6 +1712,8 @@ Full implementation of `src/app/paywall.tsx`:
 
 ```tsx
 import { usePurchases } from "@/context/purchases-context";
+import { useThemeContext } from "@/context/theme-context";
+import { Analytics } from "@/lib/analytics";
 import { MaterialIcons } from "@expo/vector-icons";
 import type { Purchase } from "expo-iap";
 import { useIAP } from "expo-iap";
@@ -1734,10 +1736,22 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Replace with actual product IDs
+// Replace with actual product IDs per platform
 const SKUS = {
-  monthly: "com.company.appname.monthly",
-  yearly: "com.company.appname.yearly",
+  monthly:
+    Platform.OS === "ios"
+      ? "com.company.appname.monthly"
+      : "appname_monthly_android",
+  yearly:
+    Platform.OS === "ios"
+      ? "com.company.appname.yearly"
+      : "appname_monthly_android", // Same subscription, different base plan
+};
+
+// Android base plan IDs (used to find correct offer within subscription)
+const ANDROID_BASE_PLANS = {
+  monthly: "com-company-appname-monthly-android",
+  yearly: "com-company-appname-yearly",
 };
 
 // Replace with actual URLs
@@ -1751,13 +1765,15 @@ interface Feature {
 
 const FEATURES: Feature[] = [
   { key: "paywall.feature1", icon: "block" },
-  { key: "paywall.feature2", icon: "notifications-active" },
+  { key: "paywall.feature2", icon: "all-inclusive" },
   { key: "paywall.feature3", icon: "cloud-off" },
 ];
 
 export default function PaywallScreen() {
   const { t } = useTranslation();
+  const { isDark } = useThemeContext();
   const { refreshPremiumStatus, isPremium } = usePurchases();
+  const c = isDark ? darkColors : lightColors;
 
   const [selectedPlan, setSelectedPlan] = useState<"monthly" | "yearly">(
     "yearly",
@@ -1776,6 +1792,8 @@ export default function PaywallScreen() {
     onPurchaseSuccess: async (purchase: Purchase) => {
       try {
         await finishTransaction({ purchase, isConsumable: false });
+        const sub = subscriptions?.find((s) => s.id === purchase.productId);
+        Analytics.logPurchaseSuccess(purchase.productId, sub?.displayPrice);
         await refreshPremiumStatus();
         router.replace("/(tabs)");
       } catch (err) {
@@ -1786,17 +1804,28 @@ export default function PaywallScreen() {
     },
     onPurchaseError: (error) => {
       setPurchasing(false);
-      if ((error as any)?.code !== "E_USER_CANCELLED") {
-        Alert.alert("Error", t("errors.purchaseFailed"));
+      const errorCode = (error as any)?.code;
+      if (errorCode !== "E_USER_CANCELLED") {
+        Analytics.logPurchaseFailed(
+          selectedPlan === "monthly" ? SKUS.monthly : SKUS.yearly,
+          errorCode,
+        );
+        Alert.alert(t("errors.generic"), t("errors.purchaseFailed"));
       }
     },
   });
 
   useEffect(() => {
     if (connected) {
-      fetchProducts({ skus: [SKUS.monthly, SKUS.yearly], type: "subs" });
+      const skusToFetch = [SKUS.monthly, SKUS.yearly];
+      fetchProducts({ skus: skusToFetch, type: "subs" });
     }
   }, [connected]);
+
+  useEffect(() => {
+    Analytics.logScreenView("PaywallScreen");
+    Analytics.logPaywallView();
+  }, []);
 
   const handleClose = () => {
     if (router.canGoBack()) {
@@ -1809,13 +1838,37 @@ export default function PaywallScreen() {
   const handleSubscribe = async () => {
     if (purchasing) return;
     setPurchasing(true);
+    const sku = selectedPlan === "monthly" ? SKUS.monthly : SKUS.yearly;
+    Analytics.logPurchaseInitiated(sku, selectedPlan);
     try {
-      const sku = selectedPlan === "monthly" ? SKUS.monthly : SKUS.yearly;
-      await requestPurchase(
-        Platform.OS === "ios"
-          ? { request: { apple: { sku } }, type: "subs" }
-          : { request: { google: { skus: [sku] } }, type: "subs" },
-      );
+      if (Platform.OS === "ios") {
+        await requestPurchase({ request: { apple: { sku } }, type: "subs" });
+      } else {
+        // Android: Use the correct base plan's offer token
+        const basePlanId =
+          selectedPlan === "monthly"
+            ? ANDROID_BASE_PLANS.monthly
+            : ANDROID_BASE_PLANS.yearly;
+        const offer = getAndroidOffer(basePlanId);
+
+        if (!offer?.offerTokenAndroid) {
+          Alert.alert(t("errors.generic"), t("errors.purchaseFailed"));
+          setPurchasing(false);
+          return;
+        }
+
+        await requestPurchase({
+          request: {
+            google: {
+              skus: [sku],
+              subscriptionOffers: [
+                { sku, offerToken: offer.offerTokenAndroid },
+              ],
+            },
+          },
+          type: "subs",
+        });
+      }
     } catch {
       setPurchasing(false);
     }
@@ -1824,16 +1877,19 @@ export default function PaywallScreen() {
   const handleRestore = async () => {
     if (restoring) return;
     setRestoring(true);
+    Analytics.logRestoreInitiated();
     try {
       await restorePurchases();
       await refreshPremiumStatus();
       if (isPremium) {
+        Analytics.logRestoreSuccess();
         router.replace("/(tabs)");
       } else {
         Alert.alert("", t("errors.noActivePurchases"));
       }
-    } catch {
-      Alert.alert("Error", t("errors.restoreFailed"));
+    } catch (e) {
+      Analytics.logRestoreFailed((e as any)?.code);
+      Alert.alert(t("errors.generic"), t("errors.restoreFailed"));
     } finally {
       setRestoring(false);
     }
@@ -1842,31 +1898,52 @@ export default function PaywallScreen() {
   const monthlyProduct = subscriptions?.find((p) => p.id === SKUS.monthly);
   const yearlyProduct = subscriptions?.find((p) => p.id === SKUS.yearly);
 
+  // Android: Get prices from subscriptionOffers by base plan ID
+  const getAndroidOffer = (basePlanId: string) => {
+    const sub = subscriptions?.[0];
+    // Find the base offer (without promotional discount) for this base plan
+    return sub?.subscriptionOffers?.find(
+      (o: any) =>
+        o.basePlanIdAndroid === basePlanId && o.type !== "promotional",
+    );
+  };
+
+  const monthlyOffer =
+    Platform.OS === "android"
+      ? getAndroidOffer(ANDROID_BASE_PLANS.monthly)
+      : null;
+  const yearlyOffer =
+    Platform.OS === "android"
+      ? getAndroidOffer(ANDROID_BASE_PLANS.yearly)
+      : null;
+
+  // Display prices - use offer prices on Android
+  const monthlyPrice =
+    Platform.OS === "android"
+      ? monthlyOffer?.displayPrice
+      : monthlyProduct?.displayPrice;
+  const yearlyPrice =
+    Platform.OS === "android"
+      ? yearlyOffer?.displayPrice
+      : yearlyProduct?.displayPrice;
+
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      <LinearGradient
-        colors={["#0A0F1E", "#111827", "#0F172A"]}
-        style={StyleSheet.absoluteFill}
-      />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+      <LinearGradient colors={c.bgGradient} style={StyleSheet.absoluteFill} />
 
       <SafeAreaView style={styles.safeArea}>
-        {/* Top bar — close button */}
+        {/* Top bar */}
         <View style={styles.topBar}>
           <TouchableOpacity
-            onPress={handleClose}
             testID="close-button"
-            style={styles.closeButton}
+            onPress={handleClose}
+            style={[styles.closeButton, { backgroundColor: c.closeBg }]}
           >
-            <MaterialIcons
-              name="close"
-              size={18}
-              color="rgba(255,255,255,0.7)"
-            />
+            <MaterialIcons name="close" size={18} color={c.closeIcon} />
           </TouchableOpacity>
         </View>
 
-        {/* Scrollable content */}
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
@@ -1875,51 +1952,87 @@ export default function PaywallScreen() {
           {/* Hero icon */}
           <View style={styles.heroWrap}>
             <LinearGradient
-              colors={["#2563EB", "#1D4ED8"]}
+              colors={["#6C63FF", "#5650CC"]}
               style={styles.heroGradient}
             >
               <MaterialIcons name="workspace-premium" size={40} color="#fff" />
             </LinearGradient>
-            <View style={styles.heroBadge}>
+            <View
+              style={[styles.heroBadge, { backgroundColor: c.heroBadgeBg }]}
+            >
               <MaterialIcons name="verified" size={14} color="#34D399" />
             </View>
           </View>
 
-          <Text style={styles.title}>{t("paywall.title")}</Text>
-          <Text style={styles.subtitle}>{t("paywall.subtitle")}</Text>
+          <Text style={[styles.title, { color: c.text }]}>
+            {t("paywall.title")}
+          </Text>
+          <Text style={[styles.subtitle, { color: c.muted }]}>
+            {t("paywall.subtitle")}
+          </Text>
 
           {/* Features */}
-          <View style={styles.featuresCard}>
+          <View
+            style={[
+              styles.featuresCard,
+              { backgroundColor: c.cardBg, borderColor: c.cardBorder },
+            ]}
+          >
             {FEATURES.map(({ key, icon }, i) => (
               <View key={key}>
                 <View style={styles.featureRow}>
-                  <View style={styles.featureIconWrap}>
-                    <MaterialIcons name={icon} size={18} color="#60A5FA" />
+                  <View
+                    style={[
+                      styles.featureIconWrap,
+                      { backgroundColor: c.featureIconBg },
+                    ]}
+                  >
+                    <MaterialIcons name={icon} size={18} color="#A78BFA" />
                   </View>
-                  <Text style={styles.featureText}>{t(key)}</Text>
+                  <Text style={[styles.featureText, { color: c.featureText }]}>
+                    {t(key)}
+                  </Text>
                   <MaterialIcons name="check" size={16} color="#34D399" />
                 </View>
-                {i < FEATURES.length - 1 && <View style={styles.separator} />}
+                {i < FEATURES.length - 1 && (
+                  <View
+                    style={[
+                      styles.separator,
+                      { backgroundColor: c.cardBorder },
+                    ]}
+                  />
+                )}
               </View>
             ))}
           </View>
 
-          {/* Plan selector — side by side */}
+          {/* Plan selector */}
           <View style={styles.plansRow}>
             {/* Monthly */}
             <TouchableOpacity
-              onPress={() => setSelectedPlan("monthly")}
+              onPress={() => {
+                setSelectedPlan("monthly");
+                Analytics.logSubscriptionSelected("monthly", monthlyPrice);
+              }}
               style={[
                 styles.planCard,
                 selectedPlan === "monthly"
                   ? styles.planCardSelected
-                  : styles.planCardIdle,
+                  : [
+                      styles.planCardIdle,
+                      {
+                        borderColor: c.planIdleBorder,
+                        backgroundColor: c.planIdleBg,
+                      },
+                    ],
               ]}
             >
               {selectedPlan === "monthly" && <View style={styles.planDot} />}
-              <Text style={styles.planLabel}>{t("paywall.monthly")}</Text>
-              <Text style={styles.planPrice}>
-                {monthlyProduct?.displayPrice ?? t("paywall.monthlyPrice")}
+              <Text style={[styles.planLabel, { color: c.planLabel }]}>
+                {t("paywall.monthly")}
+              </Text>
+              <Text style={[styles.planPrice, { color: c.text }]}>
+                {monthlyPrice ?? t("paywall.monthlyPrice")}
               </Text>
             </TouchableOpacity>
 
@@ -1929,20 +2042,31 @@ export default function PaywallScreen() {
                 <Text style={styles.badgeText}>{t("paywall.yearlyBadge")}</Text>
               </View>
               <TouchableOpacity
-                onPress={() => setSelectedPlan("yearly")}
+                onPress={() => {
+                  setSelectedPlan("yearly");
+                  Analytics.logSubscriptionSelected("yearly", yearlyPrice);
+                }}
                 style={[
                   styles.planCard,
                   selectedPlan === "yearly"
                     ? styles.planCardSelected
-                    : styles.planCardIdle,
+                    : [
+                        styles.planCardIdle,
+                        {
+                          borderColor: c.planIdleBorder,
+                          backgroundColor: c.planIdleBg,
+                        },
+                      ],
                 ]}
               >
                 {selectedPlan === "yearly" && <View style={styles.planDot} />}
-                <Text style={styles.planLabel}>{t("paywall.yearly")}</Text>
-                <Text style={styles.planPrice}>
-                  {yearlyProduct?.displayPrice ?? t("paywall.yearlyPrice")}
+                <Text style={[styles.planLabel, { color: c.planLabel }]}>
+                  {t("paywall.yearly")}
                 </Text>
-                <Text style={styles.planPerWeek}>
+                <Text style={[styles.planPrice, { color: c.text }]}>
+                  {yearlyPrice ?? t("paywall.yearlyPrice")}
+                </Text>
+                <Text style={[styles.planPerWeek, { color: c.muted }]}>
                   {t("paywall.yearlyPerWeek")}
                 </Text>
               </TouchableOpacity>
@@ -1950,17 +2074,17 @@ export default function PaywallScreen() {
           </View>
         </ScrollView>
 
-        {/* Sticky bottom CTA */}
-        <View style={styles.footer} className="px-6 pb-4 pt-3">
-          {/* Gradient subscribe button — kept as Pressable for custom gradient */}
+        {/* Sticky footer */}
+        <View style={[styles.footer, { borderTopColor: c.footerBorder }]}>
           <Pressable
+            testID="subscribe-button"
             onPress={handleSubscribe}
             disabled={purchasing}
             style={styles.subscribeTouchable}
           >
             <LinearGradient
               colors={
-                purchasing ? ["#374151", "#374151"] : ["#2563EB", "#1D4ED8"]
+                purchasing ? ["#374151", "#374151"] : ["#6C63FF", "#5650CC"]
               }
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
@@ -1969,24 +2093,28 @@ export default function PaywallScreen() {
               {purchasing ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white text-lg font-bold tracking-wide">
+                <Text style={styles.subscribeButtonText}>
                   {t("paywall.subscribe")}
                 </Text>
               )}
             </LinearGradient>
           </Pressable>
 
-          <Text style={styles.autoRenewText}>{t("paywall.autoRenew")}</Text>
+          <Text style={[styles.autoRenewText, { color: c.muted }]}>
+            {t("paywall.autoRenew")}
+          </Text>
 
           <TouchableOpacity
             onPress={handleRestore}
             disabled={restoring}
-            style={styles.restoreRow}
+            style={styles.restoreButton}
           >
             {restoring ? (
-              <ActivityIndicator size="small" color="rgba(255,255,255,0.4)" />
+              <ActivityIndicator size="small" color={c.muted} />
             ) : (
-              <Text style={styles.linkText}>{t("paywall.restore")}</Text>
+              <Text style={[styles.restoreText, { color: c.linkText }]}>
+                {t("paywall.restore")}
+              </Text>
             )}
           </TouchableOpacity>
 
@@ -1994,13 +2122,17 @@ export default function PaywallScreen() {
             <TouchableOpacity
               onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
             >
-              <Text style={styles.linkText}>{t("paywall.terms")}</Text>
+              <Text style={[styles.linkText, { color: c.linkText }]}>
+                {t("paywall.terms")}
+              </Text>
             </TouchableOpacity>
-            <Text style={styles.linkDot}>·</Text>
+            <Text style={[styles.linkDot, { color: c.muted }]}>·</Text>
             <TouchableOpacity
               onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
             >
-              <Text style={styles.linkText}>{t("paywall.privacy")}</Text>
+              <Text style={[styles.linkText, { color: c.linkText }]}>
+                {t("paywall.privacy")}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2008,6 +2140,42 @@ export default function PaywallScreen() {
     </View>
   );
 }
+
+const lightColors = {
+  bgGradient: ["#F0EEFF", "#F9FAFB", "#EEF2FF"] as const,
+  text: "#111827",
+  muted: "#6B7280",
+  closeBg: "rgba(0,0,0,0.07)",
+  closeIcon: "#374151",
+  heroBadgeBg: "#F9FAFB",
+  cardBg: "rgba(0,0,0,0.04)",
+  cardBorder: "rgba(0,0,0,0.08)",
+  featureIconBg: "rgba(108,99,255,0.12)",
+  featureText: "#374151",
+  planIdleBorder: "rgba(0,0,0,0.12)",
+  planIdleBg: "rgba(0,0,0,0.03)",
+  planLabel: "#6B7280",
+  footerBorder: "rgba(0,0,0,0.07)",
+  linkText: "#6B7280",
+};
+
+const darkColors = {
+  bgGradient: ["#0A0F1E", "#111827", "#0F172A"] as const,
+  text: "#FFFFFF",
+  muted: "rgba(255,255,255,0.4)",
+  closeBg: "rgba(255,255,255,0.1)",
+  closeIcon: "rgba(255,255,255,0.7)",
+  heroBadgeBg: "#0F172A",
+  cardBg: "rgba(255,255,255,0.05)",
+  cardBorder: "rgba(255,255,255,0.08)",
+  featureIconBg: "rgba(108,99,255,0.2)",
+  featureText: "rgba(255,255,255,0.85)",
+  planIdleBorder: "rgba(255,255,255,0.12)",
+  planIdleBg: "rgba(255,255,255,0.04)",
+  planLabel: "rgba(255,255,255,0.55)",
+  footerBorder: "rgba(255,255,255,0.07)",
+  linkText: "rgba(255,255,255,0.4)",
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -2023,7 +2191,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.1)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2032,11 +2199,39 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     alignItems: "center",
   },
+  heroWrap: {
+    marginTop: 16,
+    marginBottom: 24,
+    alignItems: "center",
+  },
+  heroGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroBadge: {
+    position: "absolute",
+    bottom: -4,
+    right: -4,
+    borderRadius: 10,
+    padding: 2,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 24,
+  },
   featuresCard: {
     width: "100%",
-    backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
     borderRadius: 14,
     marginBottom: 20,
     overflow: "hidden",
@@ -2052,19 +2247,16 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: "rgba(37,99,235,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
   featureText: {
     flex: 1,
-    color: "rgba(255,255,255,0.85)",
     fontSize: 14,
     fontWeight: "500",
   },
   separator: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: "rgba(255,255,255,0.08)",
     marginHorizontal: 16,
   },
   plansRow: {
@@ -2101,13 +2293,11 @@ const styles = StyleSheet.create({
   },
   planCardSelected: {
     borderWidth: 2,
-    borderColor: "#2563EB",
-    backgroundColor: "rgba(37,99,235,0.12)",
+    borderColor: "#6C63FF",
+    backgroundColor: "rgba(108,99,255,0.12)",
   },
   planCardIdle: {
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.04)",
   },
   planDot: {
     position: "absolute",
@@ -2116,29 +2306,28 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#2563EB",
+    backgroundColor: "#6C63FF",
   },
   planLabel: {
-    color: "rgba(255,255,255,0.55)",
     fontSize: 11,
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 1,
   },
   planPrice: {
-    color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "700",
     textAlign: "center",
   },
   planPerWeek: {
-    color: "rgba(255,255,255,0.4)",
     fontSize: 11,
     textAlign: "center",
   },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.07)",
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+    paddingTop: 16,
   },
   subscribeTouchable: {
     borderRadius: 14,
@@ -2150,17 +2339,24 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 16,
   },
+  subscribeButtonText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "700",
+  },
   autoRenewText: {
-    color: "rgba(255,255,255,0.3)",
     fontSize: 11,
     textAlign: "center",
+    marginBottom: 6,
+  },
+  restoreButton: {
+    alignItems: "center",
+    paddingVertical: 8,
     marginBottom: 8,
   },
-  restoreRow: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 4,
-    marginBottom: 8,
+  restoreText: {
+    fontSize: 13,
+    textDecorationLine: "underline",
   },
   linksRow: {
     flexDirection: "row",
@@ -2169,11 +2365,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   linkText: {
-    color: "rgba(255,255,255,0.4)",
     fontSize: 13,
   },
   linkDot: {
-    color: "rgba(255,255,255,0.2)",
     fontSize: 14,
   },
 });
@@ -2181,11 +2375,15 @@ const styles = StyleSheet.create({
 
 > **Notes:**
 >
-> - Replace `SKUS` with the app's actual App Store / Play Store product IDs
+> - Replace `SKUS` with the app's actual App Store / Play Store product IDs (iOS uses separate SKUs per plan, Android may use a single subscription with multiple base plans)
+> - Replace `ANDROID_BASE_PLANS` with the actual base plan IDs from Google Play Console
 > - Replace `TERMS_URL` and `PRIVACY_URL` with actual links
 > - Default selected plan is **yearly** — adjust `FEATURES` array per app
-> - `displayPrice` from `subscriptions` shows the real localized price; fallback strings are used while products load
-> - Add i18n keys: `paywall.title`, `paywall.subtitle`, `paywall.monthly`, `paywall.yearly`, `paywall.monthlyPrice`, `paywall.yearlyPrice`, `paywall.yearlyBadge`, `paywall.yearlyPerWeek`, `paywall.subscribe`, `paywall.autoRenew`, `paywall.restore`, `paywall.terms`, `paywall.privacy`, `paywall.feature1-3`, `errors.purchaseFailed`, `errors.noActivePurchases`, `errors.restoreFailed`
+> - On **Android**, prices are extracted from `subscriptionOffers` using `basePlanIdAndroid` since a single subscription can have multiple base plans (monthly/yearly)
+> - On **iOS**, `displayPrice` comes directly from the subscription product
+> - `Analytics` integration tracks: screen views, paywall views, subscription selection, purchase initiated/success/failed, restore initiated/success/failed
+> - Theme-aware: uses `useThemeContext()` for light/dark mode with separate color palettes
+> - Add i18n keys: `paywall.title`, `paywall.subtitle`, `paywall.monthly`, `paywall.yearly`, `paywall.monthlyPrice`, `paywall.yearlyPrice`, `paywall.yearlyBadge`, `paywall.yearlyPerWeek`, `paywall.subscribe`, `paywall.autoRenew`, `paywall.restore`, `paywall.terms`, `paywall.privacy`, `paywall.feature1-3`, `errors.generic`, `errors.purchaseFailed`, `errors.noActivePurchases`, `errors.restoreFailed`
 
 ### Settings Screen Options (REQUIRED)
 
