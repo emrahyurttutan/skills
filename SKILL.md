@@ -1,6 +1,6 @@
 ---
 name: emrah-skills
-description: Expo React Native mobile app development with expo-iap in-app purchases, AdMob ads, i18n localization, ATT tracking transparency, optional OIDC authentication, onboarding flow, paywall, and NativeTabs navigation
+description: Expo React Native mobile app development with expo-iap in-app purchases, AdMob ads, i18n localization, ATT tracking transparency, optional OIDC authentication, optional Firebase Analytics and push notifications, onboarding flow, paywall, and NativeTabs navigation
 ---
 
 # Expo Mobile Application Development Guide
@@ -1041,7 +1041,10 @@ When user asks to create an app, you MUST:
 2. **SECOND ask: "Does the app require user login/authentication (OIDC)?"**
    - If **YES** → follow the [Authentication (OIDC)](#authentication-oidc--optional) section after project setup
    - If **NO** → skip auth entirely
-3. Create the project in the CURRENT directory using:
+3. **THIRD ask: "Does the app need Firebase Analytics + Push Notifications?"**
+   - If **YES** → follow the [Firebase (Analytics + Push)](#firebase-analytics--push--optional) section after project setup
+   - If **NO** → skip Firebase entirely
+4. Create the project in the CURRENT directory using:
 
 ```bash
 bunx create-expo -t default@next app-name
@@ -1077,6 +1080,7 @@ bunx create-expo -t default@next app-name
 - **Animations**: react-native-reanimated
 - **Storage**: localStorage via expo-sqlite polyfill
 - **Authentication** _(optional)_: OIDC via expo-auth-session + expo-secure-store + zustand
+- **Analytics & Push** _(optional)_: Firebase via @react-native-firebase/app + analytics + messaging
 
 > **WARNING**: DO NOT USE AsyncStorage! Use expo-sqlite polyfill instead.
 
@@ -1125,6 +1129,8 @@ project-root/
 │   │   ├── notifications.ts
 │   │   ├── purchases.ts
 │   │   ├── ads.ts
+│   │   ├── analytics.ts              # (if Firebase enabled)
+│   │   ├── messaging.ts              # (if Firebase enabled)
 │   │   └── i18n.ts
 │   ├── services/                     # (if auth enabled)
 │   │   └── identity/
@@ -1147,10 +1153,16 @@ project-root/
 │   ├── 05_main_tabs.yaml
 │   ├── 06_settings.yaml
 │   └── 07_full_flow.yaml
+├── plugins/                          # (if Firebase enabled)
+│   ├── withFirebaseNotificationColorFix.js
+│   └── withFirebasePodfileFix.js
 ├── assets/
 │   └── images/
 ├── ios/
 ├── android/
+├── google-services.json              # (if Firebase enabled, Android — DO NOT COMMIT)
+├── GoogleService-Info.plist          # (if Firebase enabled, iOS — DO NOT COMMIT)
+├── firebase.json                     # (if Firebase enabled)
 ├── app.json
 ├── eas.json
 ├── package.json
@@ -3454,6 +3466,454 @@ appId: ${APP_ID:-com.company.appname}
       platform: iOS
     file: 01_att_permission.yaml
 ```
+
+---
+
+---
+
+## Firebase (Analytics + Push — Optional)
+
+> **Only implement this section if the user answered YES to "Does the app need Firebase Analytics + Push Notifications?"**
+
+### Install Firebase Libraries
+
+```bash
+# Core (required first), then Analytics and Messaging
+npx expo install @react-native-firebase/app @react-native-firebase/analytics @react-native-firebase/messaging
+
+# Build properties (skip if already installed for AdMob)
+npx expo install expo-build-properties
+```
+
+### Credential Files (REQUIRED)
+
+Obtain from [Firebase Console](https://console.firebase.google.com/) → Project Settings → Your App:
+
+| File                       | Platform | Source                                    |
+| -------------------------- | -------- | ----------------------------------------- |
+| `google-services.json`     | Android  | Firebase Console → Android app → Download |
+| `GoogleService-Info.plist` | iOS      | Firebase Console → iOS app → Download     |
+
+Place both files at the **project root**. Add them to `.gitignore`:
+
+```gitignore
+# Firebase credentials — never commit
+google-services.json
+GoogleService-Info.plist
+```
+
+### Custom Expo Config Plugins
+
+Create a `plugins/` folder at the project root with these two files:
+
+#### `plugins/withFirebaseNotificationColorFix.js`
+
+```js
+const { withAndroidManifest } = require("expo/config-plugins");
+
+/**
+ * Fixes manifest merger conflict:
+ * react-native-firebase/messaging declares default_notification_color as @color/white
+ * but our app declares it as @color/notification_icon_color.
+ * Adding tools:replace="android:resource" lets our value win.
+ */
+const withFirebaseNotificationColorFix = (config) => {
+  return withAndroidManifest(config, (config) => {
+    const manifest = config.modResults;
+
+    // Ensure xmlns:tools is declared on the root manifest element
+    if (!manifest.manifest.$("xmlns:tools")) {
+      manifest.manifest.$("xmlns:tools") = "http://schemas.android.com/tools";
+    }
+
+    const app = manifest.manifest.application?.[0];
+    if (!app) return config;
+
+    const metaDataArray = app["meta-data"] || [];
+    const target = metaDataArray.find(
+      (item) =>
+        item.$?.["android:name"] ===
+        "com.google.firebase.messaging.default_notification_color",
+    );
+
+    if (target) {
+      target.$("tools:replace") = "android:resource";
+    }
+
+    return config;
+  });
+};
+
+module.exports = withFirebaseNotificationColorFix;
+```
+
+#### `plugins/withFirebasePodfileFix.js`
+
+```js
+const { withDangerousMod } = require("expo/config-plugins");
+const path = require("path");
+const fs = require("fs");
+
+/**
+ * Fixes pod install error:
+ *   "The Swift pod `FirebaseCoreInternal` depends upon `GoogleUtilities`,
+ *    which does not define modules."
+ *
+ * Solution: inject `use_modular_headers!` before the target block.
+ * This tells CocoaPods to generate module maps for all pods, allowing
+ * GoogleUtilities to be imported from Swift without modular headers.
+ */
+const withFirebasePodfileFix = (config) => {
+  return withDangerousMod(config, [
+    "ios",
+    (config) => {
+      const podfilePath = path.join(
+        config.modRequest.platformProjectRoot,
+        "Podfile",
+      );
+      let contents = fs.readFileSync(podfilePath, "utf-8");
+
+      const flag = "use_modular_headers!";
+
+      // Only add if not already present
+      if (!contents.includes(flag)) {
+        // Insert before the first `target '...' do` line
+        contents = contents.replace(
+          /^(target\s+['"].+['"]\s+do)/m,
+          `${flag}\n\n$1`,
+        );
+        fs.writeFileSync(podfilePath, contents, "utf-8");
+      }
+
+      return config;
+    },
+  ]);
+};
+
+module.exports = withFirebasePodfileFix;
+```
+
+### `app.json` Configuration (REQUIRED)
+
+Merge the following into your existing `app.json`:
+
+```json
+{
+  "expo": {
+    "android": {
+      "googleServicesFile": "./google-services.json"
+    },
+    "ios": {
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "entitlements": {
+        "aps-environment": "production"
+      },
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      ["expo-build-properties", { "ios": { "useFrameworks": "static" } }],
+      "./plugins/withFirebaseNotificationColorFix",
+      "./plugins/withFirebasePodfileFix"
+    ]
+  }
+}
+```
+
+> **Note:** `@react-native-firebase/analytics` does NOT need a plugins entry — only `app` and `messaging` do.
+
+> **CRITICAL for iOS:** `expo-build-properties` with `useFrameworks: static` together with `withFirebasePodfileFix` ensures Firebase iOS SDK (v9+) builds correctly. Without these, `pod install` will fail with `FirebaseCoreInternal` / `GoogleUtilities` errors.
+
+### `firebase.json` (Project Root — GDPR Opt-In)
+
+Create `firebase.json` at the project root to disable automatic data collection:
+
+```json
+{
+  "react-native": {
+    "analytics_auto_collection_enabled": false,
+    "google_analytics_automatic_screen_reporting_enabled": false
+  }
+}
+```
+
+> This disables automatic screen tracking — all events are fired manually via `Analytics.*` calls.
+
+### `src/lib/analytics.ts` (Full Implementation)
+
+This file implements all `Analytics.*` calls referenced in `paywall.tsx` and anywhere else in the app:
+
+```typescript
+import analytics from "@react-native-firebase/analytics";
+
+/**
+ * Analytics wrapper around Firebase Analytics.
+ * All methods are fire-and-forget with silent error handling —
+ * a Firebase failure must never crash the app.
+ */
+export const Analytics = {
+  async logScreenView(screenName: string): Promise<void> {
+    try {
+      if (__DEV__) console.log("[Analytics] screenView:", screenName);
+      await analytics().logScreenView({
+        screen_name: screenName,
+        screen_class: screenName,
+      });
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logScreenView error:", e);
+    }
+  },
+
+  async logPaywallView(): Promise<void> {
+    try {
+      if (__DEV__) console.log("[Analytics] paywall_view");
+      await analytics().logEvent("paywall_view");
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logPaywallView error:", e);
+    }
+  },
+
+  async logSubscriptionSelected(plan: string, price?: string): Promise<void> {
+    try {
+      if (__DEV__)
+        console.log("[Analytics] subscription_selected:", plan, price);
+      await analytics().logEvent("subscription_selected", {
+        plan,
+        price: price ?? "unknown",
+      });
+    } catch (e) {
+      if (__DEV__)
+        console.warn("[Analytics] logSubscriptionSelected error:", e);
+    }
+  },
+
+  async logPurchaseInitiated(sku: string, plan: string): Promise<void> {
+    try {
+      if (__DEV__) console.log("[Analytics] purchase_initiated:", sku, plan);
+      await analytics().logEvent("purchase_initiated", { sku, plan });
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logPurchaseInitiated error:", e);
+    }
+  },
+
+  async logPurchaseSuccess(productId: string, price?: string): Promise<void> {
+    try {
+      if (__DEV__)
+        console.log("[Analytics] purchase_success:", productId, price);
+      await analytics().logPurchase({
+        currency: "USD",
+        value: price ? parseFloat(price.replace(/[^0-9.]/g, "")) : 0,
+        items: [{ item_id: productId, item_name: productId }],
+      });
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logPurchaseSuccess error:", e);
+    }
+  },
+
+  async logPurchaseFailed(sku: string, errorCode?: string): Promise<void> {
+    try {
+      if (__DEV__) console.log("[Analytics] purchase_failed:", sku, errorCode);
+      await analytics().logEvent("purchase_failed", {
+        sku,
+        error_code: errorCode ?? "unknown",
+      });
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logPurchaseFailed error:", e);
+    }
+  },
+
+  async logRestoreInitiated(): Promise<void> {
+    try {
+      if (__DEV__) console.log("[Analytics] restore_initiated");
+      await analytics().logEvent("restore_initiated");
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logRestoreInitiated error:", e);
+    }
+  },
+
+  async logRestoreSuccess(): Promise<void> {
+    try {
+      if (__DEV__) console.log("[Analytics] restore_success");
+      await analytics().logEvent("restore_success");
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logRestoreSuccess error:", e);
+    }
+  },
+
+  async logRestoreFailed(errorCode?: string): Promise<void> {
+    try {
+      if (__DEV__) console.log("[Analytics] restore_failed:", errorCode);
+      await analytics().logEvent("restore_failed", {
+        error_code: errorCode ?? "unknown",
+      });
+    } catch (e) {
+      if (__DEV__) console.warn("[Analytics] logRestoreFailed error:", e);
+    }
+  },
+};
+```
+
+### `src/lib/messaging.ts` (FCM Token + Backend)
+
+```typescript
+import messaging from "@react-native-firebase/messaging";
+import axios from "axios";
+import { Platform } from "react-native";
+import "expo-sqlite/localStorage/install";
+
+// ── Replace these with your app's actual values ──────────────
+const PUSH_TOKEN_API = "https://your-api.example.com/app_push_token";
+const APP_NAME = "your-app-name"; // e.g. "tarih-altin-bilgiler"
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Request notification permission (iOS only — Android 13+ handled separately).
+ * Returns true if granted/provisional, false if denied.
+ */
+export async function requestNotificationPermission(): Promise<boolean> {
+  const authStatus = await messaging().requestPermission();
+  return (
+    authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+    authStatus === messaging.AuthorizationStatus.PROVISIONAL
+  );
+}
+
+/**
+ * Get the FCM registration token for this device.
+ * Returns null if messaging is not supported or permission was denied.
+ */
+export async function getFCMToken(): Promise<string | null> {
+  try {
+    const token = await messaging().getToken();
+    return token;
+  } catch (e) {
+    if (__DEV__) console.warn("[FCM] getToken error:", e);
+    return null;
+  }
+}
+
+/**
+ * Send the FCM token to your backend API.
+ */
+export async function sendTokenToBackend(
+  token: string,
+  appName: string = APP_NAME,
+): Promise<void> {
+  try {
+    await axios.post(
+      PUSH_TOKEN_API,
+      {
+        expoPushToken: token,
+        platform: Platform.OS,
+        app: appName,
+        v2: 1,
+      },
+      {
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+      },
+    );
+    if (__DEV__) console.log("[FCM] Token sent to backend:", token);
+  } catch (e) {
+    if (__DEV__) console.warn("[FCM] sendTokenToBackend error:", e);
+  }
+}
+
+/**
+ * Register foreground message handler.
+ * Returns an unsubscribe function — call it on cleanup.
+ */
+export function registerForegroundHandler(): () => void {
+  const unsubscribe = messaging().onMessage(async (remoteMessage) => {
+    if (__DEV__) console.log("[FCM] Foreground message:", remoteMessage);
+    // Handle foreground notification here (e.g. show in-app banner)
+  });
+  return unsubscribe;
+}
+
+/**
+ * Main setup function — call once in _layout.tsx useEffect.
+ * Requests permission, gets token, sends to backend, caches locally.
+ * Token is only re-sent when it changes (avoids duplicate backend calls).
+ */
+export async function setupMessaging(
+  appName: string = APP_NAME,
+): Promise<void> {
+  try {
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      if (__DEV__) console.log("[FCM] Notification permission denied");
+      return;
+    }
+
+    const token = await getFCMToken();
+    if (!token) return;
+
+    // Cache token locally to avoid unnecessary backend calls
+    const cachedToken = globalThis.localStorage.getItem("fcm_token");
+    if (cachedToken === token) return; // Already sent
+
+    await sendTokenToBackend(token, appName);
+    globalThis.localStorage.setItem("fcm_token", token);
+  } catch (e) {
+    if (__DEV__) console.warn("[FCM] setupMessaging error:", e);
+  }
+}
+```
+
+#### Background Handler (`index.ts` — Entry Point, REQUIRED)
+
+The background handler MUST be registered **outside the React tree**, in the app entry file:
+
+```typescript
+// index.ts (project root)
+import messaging from "@react-native-firebase/messaging";
+
+// Must be registered before any React component renders
+messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+  console.log("[FCM] Background message:", remoteMessage);
+  // Handle background notification (e.g. update badge, trigger local notification)
+});
+```
+
+### Wiring in `_layout.tsx`
+
+```tsx
+import { useEffect } from "react";
+import { setupMessaging, registerForegroundHandler } from "@/lib/messaging";
+
+// ── Replace with your app name ──
+const APP_NAME = "your-app-name";
+
+export default function RootLayout() {
+  useEffect(() => {
+    // Firebase Cloud Messaging setup
+    setupMessaging(APP_NAME);
+    const unsubscribeFCM = registerForegroundHandler();
+    return () => unsubscribeFCM();
+  }, []);
+
+  // ... rest of layout
+}
+```
+
+### Firebase Important Notes
+
+| Topic                       | Detail                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------- |
+| **Expo Go**                 | Does NOT work — requires custom dev client (`eas build --profile development`)              |
+| **Prebuild**                | Always run `npx expo prebuild --clean` after adding Firebase                                |
+| **Credentials**             | Add `google-services.json` and `GoogleService-Info.plist` to `.gitignore` — never commit    |
+| **Android color fix**       | `withFirebaseNotificationColorFix` resolves manifest merger conflict for notification color |
+| **iOS CocoaPods**           | `withFirebasePodfileFix` injects `use_modular_headers!` to fix Swift/GoogleUtilities error  |
+| **Analytics auto-track**    | Disabled in `firebase.json` — all events fired manually via `Analytics.*`                   |
+| **Token caching**           | FCM token cached in localStorage — backend called only when token changes                   |
+| **`useFrameworks: static`** | Required for Firebase iOS SDK v9+ via `expo-build-properties`                               |
 
 ---
 
