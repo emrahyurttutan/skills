@@ -3352,7 +3352,7 @@ jobs:
         run: npm install
 
       - name: Install Maestro
-        run: brew install maestro  # macOS runner — no remote script execution
+        run: brew install maestro # macOS runner — no remote script execution
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app
