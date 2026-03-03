@@ -1039,7 +1039,10 @@ When user asks to create an app, you MUST:
 3. **THIRD ask: "Does the app need Firebase Analytics + Push Notifications?"**
    - If **YES** → follow the [Firebase (Analytics + Push)](#firebase-analytics--push--optional) section after project setup
    - If **NO** → skip Firebase entirely
-4. Create the project in the CURRENT directory using:
+4. **FOURTH ask: "Does the app need iOS/Android home screen widgets?"**
+   - If **YES** → follow the [Widgets](#widgets-ios--android--optional) section after project setup
+   - If **NO** → skip widgets entirely
+5. Create the project in the CURRENT directory using:
 
 ```bash
 bunx create-expo -t default@next app-name
@@ -1076,6 +1079,7 @@ bunx create-expo -t default@next app-name
 - **Storage**: localStorage via expo-sqlite polyfill
 - **Authentication** _(optional)_: OIDC via expo-auth-session + expo-secure-store + zustand
 - **Analytics & Push** _(optional)_: Firebase via @react-native-firebase/app + analytics + messaging
+- **Widgets** _(optional)_: iOS via expo-widgets (@expo/ui) + Android via custom config plugin + Kotlin AppWidgetProvider
 
 > **WARNING**: DO NOT USE AsyncStorage! Use expo-sqlite polyfill instead.
 
@@ -1148,9 +1152,26 @@ project-root/
 │   ├── 05_main_tabs.yaml
 │   ├── 06_settings.yaml
 │   └── 07_full_flow.yaml
-├── plugins/                          # (if Firebase enabled)
+├── widgets/                          # (if widgets enabled)
+│   └── MyWidget.tsx                  #   iOS widget component (expo-widgets)
+├── modules/                          # (if widgets enabled)
+│   └── widget-data/                  #   Android-only native module
+│       ├── package.json
+│       ├── expo-module.config.json
+│       ├── index.ts
+│       └── android/
+│           ├── build.gradle
+│           └── src/main/java/…/WidgetDataModule.kt
+├── plugins/                          # (if Firebase or widgets enabled)
 │   ├── withFirebaseNotificationColorFix.js
-│   └── withFirebasePodfileFix.js
+│   ├── withFirebasePodfileFix.js
+│   └── with-android-widget.js        # (if widgets enabled)
+├── plugin-templates/                 # (if widgets enabled)
+│   └── android-widget/
+│       ├── res/layout/
+│       ├── res/xml/
+│       ├── res/drawable/
+│       └── src/…/widget/*.kt
 ├── assets/
 │   └── images/
 ├── ios/
@@ -3915,6 +3936,819 @@ export default function RootLayout() {
 
 ---
 
+## Widgets (iOS & Android — Optional)
+
+> **Only implement this section if the user answered YES to "Does the app need iOS/Android home screen widgets?"**
+
+### Architecture Overview
+
+```
+iOS (expo-widgets — no native code needed):
+  widgets/MyWidget.tsx
+    → createWidget() + @expo/ui/swift-ui components
+    → updateSnapshot() / updateTimeline() from React Native side
+    → Data sharing via expo-widgets built-in mechanism
+
+Android (custom config plugin + Kotlin):
+  React Native App
+    → modules/widget-data/index.ts → saveWidgetData(data)
+    → WidgetDataModule.kt → SharedPreferences + AppWidgetManager broadcast
+    → AppWidgetProvider subclasses read SharedPreferences and render RemoteViews
+```
+
+**iOS** uses the official `expo-widgets` package (alpha) — widgets are written in TypeScript using `@expo/ui/swift-ui` components with the `'widget'` directive. No raw Swift code is needed.
+
+**Android** has no `expo-widgets` support. A custom Expo native module (`modules/widget-data`) writes data to `SharedPreferences`, and a config plugin (`with-android-widget.js`) injects Kotlin `AppWidgetProvider` classes + XML layouts into the Android build.
+
+### Install Widget Libraries
+
+```bash
+# iOS — expo-widgets + Expo UI components
+npx expo install expo-widgets @expo/ui
+
+# Android — no extra npm packages needed.
+# The native module lives in modules/widget-data/ (local module).
+# Add to package.json dependencies:
+#   "widget-data": "file:./modules/widget-data"
+```
+
+Then run `bun install` (or `npm install`) to link the local module.
+
+### app.json Configuration (REQUIRED)
+
+Add the `expo-widgets` plugin and (if Android widgets enabled) the Android widget plugin:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.com.company.appname",
+          "widgets": [
+            {
+              "name": "MyWidget",
+              "displayName": "My Widget",
+              "description": "Shows key info at a glance",
+              "supportedFamilies": ["systemMedium"]
+            }
+          ]
+        }
+      ],
+      "./plugins/with-android-widget"
+    ]
+  }
+}
+```
+
+> **Notes:**
+>
+> - `groupIdentifier` defaults to `group.<bundleIdentifier>` if omitted — set it explicitly when you also need App Groups for other features
+> - `name` must be a valid Swift identifier (no spaces) and must match the name passed to `createWidget()` in your widget file
+> - `supportedFamilies`: at minimum include `"systemMedium"`. Add `"systemSmall"` and `"systemLarge"` as needed
+> - Available families: `systemSmall`, `systemMedium`, `systemLarge`, `systemExtraLarge` (iPad), `accessoryCircular`, `accessoryRectangular`, `accessoryInline` (Lock Screen)
+
+### iOS Widget — expo-widgets (TypeScript)
+
+Create `widgets/MyWidget.tsx`:
+
+```tsx
+import { Text, VStack, HStack, Spacer } from "@expo/ui/swift-ui";
+import { font, foregroundStyle, padding } from "@expo/ui/swift-ui/modifiers";
+import { createWidget, WidgetBase } from "expo-widgets";
+
+// ── Define your widget data shape ──────────────────────────
+// Customize these fields based on your app's data model.
+type MyWidgetProps = {
+  title: string;
+  subtitle: string;
+  value: string;
+  updatedAt: string;
+};
+
+const MyWidget = (props: WidgetBase<MyWidgetProps>) => {
+  "widget";
+
+  // Responsive layout based on widget family (size)
+  if (props.family === "systemSmall") {
+    return (
+      <VStack modifiers={[padding({ all: 12 })]}>
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 14 }),
+            foregroundStyle("#FFFFFF"),
+          ]}
+        >
+          {props.title}
+        </Text>
+        <Spacer />
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 28 }),
+            foregroundStyle("#FFFFFF"),
+          ]}
+        >
+          {props.value}
+        </Text>
+        <Text
+          modifiers={[
+            font({ size: 11 }),
+            foregroundStyle("rgba(255,255,255,0.6)"),
+          ]}
+        >
+          {props.updatedAt}
+        </Text>
+      </VStack>
+    );
+  }
+
+  if (props.family === "systemLarge") {
+    return (
+      <VStack modifiers={[padding({ all: 16 })]}>
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 18 }),
+            foregroundStyle("#FFFFFF"),
+          ]}
+        >
+          {props.title}
+        </Text>
+        <Text
+          modifiers={[
+            font({ size: 14 }),
+            foregroundStyle("rgba(255,255,255,0.7)"),
+          ]}
+        >
+          {props.subtitle}
+        </Text>
+        <Spacer />
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 36 }),
+            foregroundStyle("#FFFFFF"),
+          ]}
+        >
+          {props.value}
+        </Text>
+        <Spacer />
+        <Text
+          modifiers={[
+            font({ size: 11 }),
+            foregroundStyle("rgba(255,255,255,0.5)"),
+          ]}
+        >
+          {props.updatedAt}
+        </Text>
+      </VStack>
+    );
+  }
+
+  // Default: systemMedium (REQUIRED)
+  return (
+    <HStack modifiers={[padding({ all: 16 })]}>
+      <VStack>
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 16 }),
+            foregroundStyle("#FFFFFF"),
+          ]}
+        >
+          {props.title}
+        </Text>
+        <Text
+          modifiers={[
+            font({ size: 13 }),
+            foregroundStyle("rgba(255,255,255,0.7)"),
+          ]}
+        >
+          {props.subtitle}
+        </Text>
+      </VStack>
+      <Spacer />
+      <VStack>
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 28 }),
+            foregroundStyle("#FFFFFF"),
+          ]}
+        >
+          {props.value}
+        </Text>
+        <Text
+          modifiers={[
+            font({ size: 11 }),
+            foregroundStyle("rgba(255,255,255,0.5)"),
+          ]}
+        >
+          {props.updatedAt}
+        </Text>
+      </VStack>
+    </HStack>
+  );
+};
+
+export default createWidget("MyWidget", MyWidget);
+```
+
+> **Customization:**
+>
+> - Change `MyWidgetProps` type to match your app's data (e.g., weather fields, prayer times, step count, portfolio value)
+> - The `name` in `createWidget('MyWidget', ...)` must match the `name` in `app.json` plugin config
+> - Add/remove family branches based on `supportedFamilies` in config
+> - Use any `@expo/ui/swift-ui` component: `Text`, `VStack`, `HStack`, `ZStack`, `Spacer`, `Image`, `ProgressView`, etc.
+> - Apply modifiers: `font()`, `foregroundStyle()`, `padding()`, `background()`, `frame()`, `cornerRadius()`, etc.
+
+#### Updating Widget Data from React Native
+
+```typescript
+import MyWidget from "../widgets/MyWidget";
+
+// ── Snapshot update (immediate, single entry) ──────────────
+MyWidget.updateSnapshot({
+  title: "Portfolio",
+  subtitle: "Total balance",
+  value: "$12,345",
+  updatedAt: new Date().toLocaleTimeString(),
+});
+
+// ── Timeline update (scheduled entries) ─────────────────────
+MyWidget.updateTimeline([
+  {
+    date: new Date(),
+    props: { title: "Now", subtitle: "...", value: "100", updatedAt: "12:00" },
+  },
+  {
+    date: new Date(Date.now() + 3600000), // 1 hour later
+    props: { title: "Next", subtitle: "...", value: "200", updatedAt: "13:00" },
+  },
+]);
+
+// ── Force reload ────────────────────────────────────────────
+MyWidget.reload();
+```
+
+**When to call widget updates:**
+
+- App launches or returns to foreground
+- After key data changes (new fetch, user action, timer event)
+- At midnight for date-dependent widgets
+- After user changes location / settings that affect widget content
+
+### Android Widget — Custom Config Plugin + Kotlin
+
+Since `expo-widgets` is iOS-only, Android widgets require three pieces:
+
+1. **`modules/widget-data/`** — Expo native module that writes data to `SharedPreferences` and triggers widget refresh via `AppWidgetManager` broadcast
+2. **`plugins/with-android-widget.js`** — Config plugin that copies Kotlin sources, XML layouts, colors, and receivers into the Android project at prebuild time
+3. **`plugin-templates/android-widget/`** — Template files (Kotlin `AppWidgetProvider` subclasses, XML layouts, drawable, widget info XML)
+
+#### 1. Native Module — `modules/widget-data/`
+
+##### `modules/widget-data/package.json`
+
+```json
+{
+  "name": "widget-data",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "types": "index.ts"
+}
+```
+
+##### `modules/widget-data/expo-module.config.json`
+
+```json
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["com.company.appname.widgetdata.WidgetDataModule"]
+  }
+}
+```
+
+> Replace `com.company.appname` with your actual Android package name.
+
+##### `modules/widget-data/index.ts`
+
+```typescript
+import { Platform } from "react-native";
+import { NativeModule, requireNativeModule } from "expo-modules-core";
+
+// ── Define your widget data shape ──────────────────────────
+// Customize these fields to match your app.
+export interface WidgetData {
+  [key: string]: string | number | boolean;
+}
+
+interface WidgetDataModuleType extends NativeModule {
+  saveWidgetData(data: WidgetData): void;
+}
+
+let WidgetDataModule: WidgetDataModuleType | null = null;
+if (Platform.OS === "android") {
+  WidgetDataModule = requireNativeModule<WidgetDataModuleType>("WidgetData");
+}
+
+/**
+ * Save widget data to Android SharedPreferences and trigger widget refresh.
+ * No-op on iOS (iOS uses expo-widgets updateSnapshot/updateTimeline instead).
+ */
+export function saveWidgetData(data: WidgetData): void {
+  if (Platform.OS === "android" && WidgetDataModule) {
+    WidgetDataModule.saveWidgetData(data);
+  }
+}
+```
+
+##### `modules/widget-data/android/build.gradle`
+
+```groovy
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+android {
+  namespace "com.company.appname.widgetdata"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+```
+
+> Replace `com.company.appname` with your actual Android package name.
+
+##### `modules/widget-data/android/src/main/java/…/WidgetDataModule.kt`
+
+```kotlin
+package com.company.appname.widgetdata
+
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+
+class WidgetDataModule : Module() {
+
+  override fun definition() = ModuleDefinition {
+    Name("WidgetData")
+
+    Function("saveWidgetData") { data: Map<String, Any> ->
+      val context = appContext.reactContext ?: return@Function
+
+      // Write all key-value pairs to SharedPreferences with "widget_" prefix
+      val prefs = context.getSharedPreferences(
+        "group.com.company.appname.widget",
+        Context.MODE_PRIVATE
+      )
+      prefs.edit().apply {
+        for ((key, value) in data) {
+          when (value) {
+            is String  -> putString("widget_$key", value)
+            is Boolean -> putBoolean("widget_$key", value)
+            is Number  -> putString("widget_$key", value.toString())
+          }
+        }
+        apply()
+      }
+
+      // Trigger refresh for all registered widget providers
+      val widgetClasses = listOf(
+        "com.company.appname.widget.AppWidgetMedium"
+        // Add more: "…AppWidgetSmall", "…AppWidgetLarge" if you have them
+      )
+      val manager = AppWidgetManager.getInstance(context)
+      for (className in widgetClasses) {
+        try {
+          val cls = Class.forName(className)
+          val ids = manager.getAppWidgetIds(ComponentName(context, cls))
+          if (ids.isNotEmpty()) {
+            val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE).apply {
+              putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+              setClass(context, cls)
+            }
+            context.sendBroadcast(intent)
+          }
+        } catch (_: ClassNotFoundException) { }
+      }
+    }
+  }
+}
+```
+
+> **Customize:** Replace all `com.company.appname` references with your actual package. Add or remove widget provider class names in `widgetClasses`.
+
+#### 2. Config Plugin — `plugins/with-android-widget.js`
+
+This plugin runs during `expo prebuild` and:
+
+1. Copies Kotlin widget provider sources from `plugin-templates/android-widget/src/` → `android/app/src/main/java/…/widget/`
+2. Copies XML resources (layouts, widget info, drawable) from `plugin-templates/android-widget/res/` → `android/app/src/main/res/`
+3. Adds `widget_background` and `widget_accent` color entries to `colors.xml` and `values-night/colors.xml`
+4. Adds a `widget_description` string to `strings.xml`
+5. Adds `<receiver>` blocks to `AndroidManifest.xml` for each widget size
+
+```javascript
+// plugins/with-android-widget.js
+const {
+  withAndroidManifest,
+  withDangerousMod,
+} = require("expo/config-plugins");
+const path = require("path");
+const fs = require("fs");
+
+// ── CUSTOMIZE THESE ──────────────────────────────────────────
+const WIDGET_PACKAGE = "com.company.appname.widget"; // Kotlin package for widget classes
+const WIDGET_PROVIDERS = [
+  // Add/remove entries based on which sizes you implement
+  {
+    className: "AppWidgetMedium",
+    infoResource: "@xml/widget_medium_info",
+  },
+  // { className: 'AppWidgetSmall', infoResource: '@xml/widget_small_info' },
+  // { className: 'AppWidgetLarge', infoResource: '@xml/widget_large_info' },
+];
+// ─────────────────────────────────────────────────────────────
+
+function withAndroidWidgetFiles(config) {
+  return withDangerousMod(config, [
+    "android",
+    (config) => {
+      const projectRoot = config.modRequest.projectRoot;
+      const androidRoot = path.join(
+        config.modRequest.platformProjectRoot,
+        "app",
+        "src",
+        "main",
+      );
+
+      // Copy Kotlin sources
+      const srcTemplate = path.join(
+        projectRoot,
+        "plugin-templates",
+        "android-widget",
+        "src",
+      );
+      const srcDest = path.join(
+        androidRoot,
+        "java",
+        ...WIDGET_PACKAGE.split("."),
+      );
+      if (fs.existsSync(srcTemplate)) {
+        fs.mkdirSync(srcDest, { recursive: true });
+        for (const file of fs.readdirSync(srcTemplate)) {
+          fs.copyFileSync(
+            path.join(srcTemplate, file),
+            path.join(srcDest, file),
+          );
+        }
+        console.log("[with-android-widget] Copied Kotlin widget sources");
+      }
+
+      // Copy res/ (layouts, xml, drawable)
+      const resTemplate = path.join(
+        projectRoot,
+        "plugin-templates",
+        "android-widget",
+        "res",
+      );
+      const resDest = path.join(androidRoot, "res");
+      if (fs.existsSync(resTemplate)) {
+        copyDirRecursive(resTemplate, resDest);
+        console.log("[with-android-widget] Copied widget resource files");
+      }
+
+      // Add widget colors to colors.xml
+      ensureColor(
+        path.join(resDest, "values", "colors.xml"),
+        "widget_background",
+        "#F2F2F7",
+      );
+      ensureColor(
+        path.join(resDest, "values", "colors.xml"),
+        "widget_accent",
+        "#6C63FF",
+      );
+      const nightDir = path.join(resDest, "values-night");
+      fs.mkdirSync(nightDir, { recursive: true });
+      ensureColor(
+        path.join(nightDir, "colors.xml"),
+        "widget_background",
+        "#1C1C1E",
+      );
+
+      // Add widget description to strings.xml
+      ensureString(
+        path.join(resDest, "values", "strings.xml"),
+        "widget_description",
+        "Shows key info at a glance",
+      );
+
+      return config;
+    },
+  ]);
+}
+
+function withAndroidWidgetReceivers(config) {
+  return withAndroidManifest(config, (config) => {
+    const app = config.modResults.manifest.application?.[0];
+    if (!app) return config;
+    if (!app.receiver) app.receiver = [];
+
+    for (const provider of WIDGET_PROVIDERS) {
+      const fullName = `${WIDGET_PACKAGE}.${provider.className}`;
+      const exists = app.receiver.some(
+        (r) => r.$?.["android:name"] === fullName,
+      );
+      if (exists) continue;
+
+      app.receiver.push({
+        $: {
+          "android:name": fullName,
+          "android:exported": "true",
+          "android:label": "@string/app_name",
+        },
+        "intent-filter": [
+          {
+            action: [
+              {
+                $: {
+                  "android:name": "android.appwidget.action.APPWIDGET_UPDATE",
+                },
+              },
+            ],
+          },
+        ],
+        "meta-data": [
+          {
+            $: {
+              "android:name": "android.appwidget.provider",
+              "android:resource": provider.infoResource,
+            },
+          },
+        ],
+      });
+    }
+    return config;
+  });
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+function copyDirRecursive(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    entry.isDirectory() ? copyDirRecursive(s, d) : fs.copyFileSync(s, d);
+  }
+}
+
+function ensureColor(filePath, name, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(
+      filePath,
+      `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>`,
+    );
+  }
+  let content = fs.readFileSync(filePath, "utf-8");
+  if (!content.includes(`name="${name}"`)) {
+    content = content.replace(
+      "</resources>",
+      `    <color name="${name}">${value}</color>\n</resources>`,
+    );
+    fs.writeFileSync(filePath, content, "utf-8");
+  }
+}
+
+function ensureString(filePath, name, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(
+      filePath,
+      `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>`,
+    );
+  }
+  let content = fs.readFileSync(filePath, "utf-8");
+  if (!content.includes(`name="${name}"`)) {
+    content = content.replace(
+      "</resources>",
+      `    <string name="${name}">${value}</string>\n</resources>`,
+    );
+    fs.writeFileSync(filePath, content, "utf-8");
+  }
+}
+
+module.exports = (config) => {
+  config = withAndroidWidgetFiles(config);
+  config = withAndroidWidgetReceivers(config);
+  return config;
+};
+```
+
+> **Customize:**
+>
+> - Replace `WIDGET_PACKAGE` with your actual Android package + `.widget` suffix
+> - Add/remove entries in `WIDGET_PROVIDERS` for each widget size
+> - Adjust color values (`widget_background`, `widget_accent`) to match your app theme
+
+#### 3. Template Files — `plugin-templates/android-widget/`
+
+Create the following skeleton files. The config plugin copies them into the Android project at prebuild.
+
+##### `plugin-templates/android-widget/res/xml/widget_medium_info.xml`
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="220dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_medium"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_description" />
+```
+
+##### `plugin-templates/android-widget/res/layout/widget_medium.xml`
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Customize this layout for your app's widget content -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Widget Title"
+        android:textColor="@color/widget_accent"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_value"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="--"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Updated: --"
+        android:textSize="11sp" />
+</LinearLayout>
+```
+
+##### `plugin-templates/android-widget/res/drawable/widget_background.xml`
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_background" />
+    <corners android:radius="16dp" />
+</shape>
+```
+
+##### `plugin-templates/android-widget/src/AppWidgetMedium.kt`
+
+```kotlin
+package com.company.appname.widget
+
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.Context
+import android.widget.RemoteViews
+
+/**
+ * Medium home screen widget.
+ * Reads data from SharedPreferences written by WidgetDataModule.
+ *
+ * CUSTOMIZE: Change the package name, layout references, and
+ * SharedPreferences keys to match your app's data model.
+ */
+class AppWidgetMedium : AppWidgetProvider() {
+
+  override fun onUpdate(
+    context: Context,
+    appWidgetManager: AppWidgetManager,
+    appWidgetIds: IntArray
+  ) {
+    val prefs = context.getSharedPreferences(
+      "group.com.company.appname.widget",
+      Context.MODE_PRIVATE
+    )
+
+    for (id in appWidgetIds) {
+      // Replace R.layout.widget_medium with your actual layout resource
+      val views = RemoteViews(context.packageName, R.layout.widget_medium)
+
+      // Read data from SharedPreferences — customize keys per your app
+      views.setTextViewText(
+        R.id.widget_title,
+        prefs.getString("widget_title", "--") ?: "--"
+      )
+      views.setTextViewText(
+        R.id.widget_value,
+        prefs.getString("widget_value", "--") ?: "--"
+      )
+      views.setTextViewText(
+        R.id.widget_subtitle,
+        prefs.getString("widget_updatedAt", "") ?: ""
+      )
+
+      appWidgetManager.updateAppWidget(id, views)
+    }
+  }
+}
+```
+
+> **Customize:** Replace `com.company.appname`, layout IDs, and SharedPreferences keys. Add `AppWidgetSmall.kt` and `AppWidgetLarge.kt` with their own layouts if needed.
+
+### Cross-Platform Data Update Pattern
+
+Call widget updates from a shared location in your app (e.g., after data fetch):
+
+```typescript
+import { Platform } from "react-native";
+import MyWidget from "../widgets/MyWidget";
+import { saveWidgetData } from "../modules/widget-data";
+
+/**
+ * Update home screen widget with latest data.
+ * Customize the data fields based on your app.
+ */
+export function updateWidget(data: {
+  title: string;
+  subtitle: string;
+  value: string;
+  updatedAt: string;
+}) {
+  if (Platform.OS === "ios") {
+    // expo-widgets handles everything — just pass props
+    MyWidget.updateSnapshot(data);
+  } else {
+    // Android: write to SharedPreferences + trigger broadcast
+    saveWidgetData(data);
+  }
+}
+```
+
+### Adding More Widget Sizes
+
+Medium is required. To add small or large:
+
+1. **iOS:** Add `"systemSmall"` / `"systemLarge"` to `supportedFamilies` in `app.json`, then add the corresponding `if (props.family === 'systemSmall')` branch in `widgets/MyWidget.tsx`
+2. **Android:** Create additional layout XML (`widget_small.xml`), info XML (`widget_small_info.xml`), and Kotlin provider class (`AppWidgetSmall.kt`). Add the new provider to `WIDGET_PROVIDERS` in `with-android-widget.js` and to `widgetClasses` in `WidgetDataModule.kt`
+
+### Widget Customization Checklist
+
+When adapting widgets for a new app:
+
+- [ ] Define `MyWidgetProps` type (iOS) and SharedPreferences keys (Android) based on your app's data model
+- [ ] Replace all `com.company.appname` with your actual bundle ID / package name
+- [ ] Update `groupIdentifier` in `app.json` to match your App Group
+- [ ] Customize widget `displayName` and `description` in `app.json`
+- [ ] Adjust accent colors: iOS via `foregroundStyle()` modifiers, Android via `colors.xml` + Kotlin hex values
+- [ ] Customize Android XML layout (`widget_medium.xml`) text views and structure
+- [ ] Add `"widget-data": "file:./modules/widget-data"` to `package.json` dependencies
+- [ ] Run `npx expo prebuild --clean` after any widget config changes
+
+### Widget Important Notes
+
+| Topic                        | Detail                                                                                                          |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **expo-widgets status**      | Alpha — iOS only. API may change. Use development builds, not Expo Go                                           |
+| **Android approach**         | Custom config plugin + Kotlin `AppWidgetProvider`. No community package needed                                  |
+| **Minimum iOS version**      | iOS 15+ (WidgetKit requires iOS 14+, expo-widgets targets iOS 15+)                                              |
+| **Minimum Android version**  | API 21+ (standard AppWidget)                                                                                    |
+| **Data sharing (iOS)**       | Handled by `expo-widgets` internally via App Groups — no manual `UserDefaults` code needed                      |
+| **Data sharing (Android)**   | `SharedPreferences` written by native module, read by `AppWidgetProvider`                                       |
+| **Widget refresh (iOS)**     | `updateSnapshot()` for immediate, `updateTimeline()` for scheduled, `reload()` for force refresh                |
+| **Widget refresh (Android)** | `AppWidgetManager` broadcast from native module. System minimum is 30 min for `updatePeriodMillis`              |
+| **Expo Go**                  | Does NOT work — requires custom dev client (`eas build --profile development`)                                  |
+| **Prebuild**                 | Always run `npx expo prebuild --clean` after adding or modifying widget configuration                           |
+| **Multiple widgets**         | iOS: add more entries to `widgets[]` in app.json. Android: add more providers + layouts + config plugin entries |
+
+---
+
 ## Testing Checklist
 
 - [ ] `maestro test .maestro/` — all flows pass on iOS and Android
@@ -3926,6 +4760,7 @@ export default function RootLayout() {
 - [ ] Restore purchases
 - [ ] Offline support
 - [ ] Multiple screen sizes
+- [ ] Widget renders correctly on all enabled sizes — iOS and Android (if widgets enabled)
 
 ## After Development
 
