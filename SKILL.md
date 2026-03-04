@@ -299,21 +299,26 @@ import {
   ThemeProvider as NavigationThemeProvider,
 } from "@react-navigation/native";
 
-<GestureHandlerRootView style={{ flex: 1 }}>
-  <ThemeProvider>
-    <OnboardingProvider>
-      <PurchasesProvider>
-        <AdsProvider>
-          <NavigationThemeProvider
-            value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-          >
-            <Stack />
-          </NavigationThemeProvider>
-        </AdsProvider>
-      </PurchasesProvider>
-    </OnboardingProvider>
-  </ThemeProvider>
-</GestureHandlerRootView>;
+{
+  /* QueryClientProvider sadece data source (swagger/rest/supabase) seçilmişse eklenir */
+}
+<QueryClientProvider client={queryClient}>
+  <GestureHandlerRootView style={{ flex: 1 }}>
+    <ThemeProvider>
+      <OnboardingProvider>
+        <PurchasesProvider>
+          <AdsProvider>
+            <NavigationThemeProvider
+              value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+            >
+              <Stack />
+            </NavigationThemeProvider>
+          </AdsProvider>
+        </PurchasesProvider>
+      </OnboardingProvider>
+    </ThemeProvider>
+  </GestureHandlerRootView>
+</QueryClientProvider>;
 ```
 
 ### Required Libraries (ALWAYS INSTALL)
@@ -345,6 +350,22 @@ Libraries:
 - `expo-video` + `expo-audio`
 - `expo-sqlite` (for localStorage)
 - `expo-linear-gradient` (for gradient overlays)
+
+```bash
+# Data fetching (if data source: swagger / rest / supabase)
+bun add axios @tanstack/react-query
+
+# Supabase (if data source: supabase)
+bun add @supabase/supabase-js
+```
+
+> **Note:** `axios` and `@tanstack/react-query` are only needed when the app has a data source (swagger, rest, or supabase). Skip them if the user chose `static` or `none`. If auth (OIDC) is also enabled, `@tanstack/react-query` is shared — do NOT install it twice.
+
+Data fetching libraries:
+
+- `axios` (HTTP client — if data source: swagger/rest/supabase)
+- `@tanstack/react-query` (server state management — if data source: swagger/rest/supabase)
+- `@supabase/supabase-js` (Supabase client — if data source: supabase)
 
 ### expo-iap Configuration (REQUIRED in app.json)
 
@@ -1065,7 +1086,21 @@ When user asks to create an app, you MUST:
    - Both → implement both; user picks active mode from settings
    - Follow the [Notifications](#notifications) section after project setup
 
-7. Create the project in the CURRENT directory using:
+7. **SEVENTH ask: "Does the app have a data source / backend?"**
+
+   | Option         | Description                            | What gets created                                                                                                                       |
+   | -------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+   | **`swagger`**  | Swagger / OpenAPI spec URL available   | `api-client.ts` + `QueryClientProvider` + empty `services/api/` — Copilot reads the spec and writes services & types during development |
+   | **`rest`**     | REST API base URL, no spec             | `api-client.ts` + `QueryClientProvider` + empty `services/api/` — services written manually                                             |
+   | **`supabase`** | Supabase project                       | `supabase.ts` client + `QueryClientProvider` — Supabase URL & anon key taken from env                                                   |
+   | **`static`**   | No backend, data lives in `constants/` | No API client, no React Query — data files in `src/constants/`                                                                          |
+   | **`none`**     | Skip entirely                          | Nothing extra installed                                                                                                                 |
+   - If `swagger` → also ask: "What is the Swagger/OpenAPI spec URL?"
+   - If `rest` → also ask: "What is the API base URL?"
+   - If `supabase` → also ask: "What is the Supabase URL and anon key?"
+   - Follow the [Data Source](#data-source--optional) section after project setup
+
+8. Create the project in the CURRENT directory using:
 
 ```bash
 bunx create-expo -t default@next app-name
@@ -1103,6 +1138,8 @@ bunx create-expo -t default@next app-name
 - **Authentication** _(optional)_: OIDC via expo-auth-session + expo-secure-store + zustand
 - **Analytics & Push** _(optional)_: Firebase via @react-native-firebase/app + analytics + messaging
 - **Widgets** _(optional)_: iOS via expo-widgets (@expo/ui) + Android via custom config plugin + Kotlin AppWidgetProvider
+- **Data Fetching** _(optional)_: axios + @tanstack/react-query
+- **Backend** _(optional)_: Supabase (@supabase/supabase-js)
 
 > **WARNING**: DO NOT USE AsyncStorage! Use expo-sqlite polyfill instead.
 
@@ -1152,11 +1189,16 @@ project-root/
 │   │   ├── background-tasks.ts       # (if notifications enabled)
 │   │   ├── purchases.ts
 │   │   ├── ads.ts
+│   │   ├── api-client.ts             # (if data source: swagger/rest)
+│   │   ├── supabase.ts               # (if data source: supabase)
+│   │   ├── query-client.ts           # (if data source: swagger/rest/supabase)
 │   │   ├── analytics.ts              # (if Firebase enabled)
 │   │   ├── messaging.ts              # (if Firebase enabled)
 │   │   └── i18n.ts
-│   ├── services/                     # (if auth enabled)
-│   │   └── identity/
+│   ├── services/
+│   │   ├── api/                      # (if data source: swagger/rest/supabase)
+│   │   │   └── [resource].ts
+│   │   └── identity/                 # (if auth enabled)
 │   │       ├── index.ts
 │   │       ├── types.ts
 │   │       └── hooks/
@@ -2176,6 +2218,286 @@ const { notificationsEnabled, toggle } = useScheduledNotifications(events, 12);
 | **Debug**                      | `getScheduledNotificationCount()` → `daily`: ≤ 64, `scheduled` (5 events/day): ≤ 60              |
 | **Data adapter**               | Write a project-specific adapter to convert API data to `DayEvents[]` (examples above)           |
 
+### Data Source (Optional)
+
+> **Only implement this section if the user chose `swagger`, `rest`, or `supabase` as the data source. Skip entirely for `static` or `none`.**
+
+#### Environment Variables
+
+Add to `.env`:
+
+```env
+# REST / Swagger
+EXPO_PUBLIC_API_BASE_URL=https://api.example.com
+
+# Supabase
+EXPO_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbxxxxxxxxx
+```
+
+#### `src/lib/query-client.ts` — React Query Setup
+
+```typescript
+import { QueryClient } from "@tanstack/react-query";
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      retry: 2,
+      refetchOnWindowFocus: false, // not relevant in mobile
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+});
+```
+
+#### `src/lib/api-client.ts` — Axios Instance (swagger / rest)
+
+```typescript
+import axios from "axios";
+
+const apiClient = axios.create({
+  baseURL: process.env.EXPO_PUBLIC_API_BASE_URL,
+  timeout: 15_000,
+  headers: { "Content-Type": "application/json" },
+});
+
+// ── Request interceptor: auth token ─────────────────────────
+// Only added when OIDC auth is enabled.
+// Import is conditional — if auth is NOT enabled, remove this block.
+import { useAuthStore } from "@/store/authStore";
+
+apiClient.interceptors.request.use(async (config) => {
+  const token = await useAuthStore.getState().getValidAccessToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ── Response interceptor: error handling ─────────────────────
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (__DEV__) {
+      console.warn(
+        "[API]",
+        error.config?.method?.toUpperCase(),
+        error.config?.url,
+        error.response?.status,
+      );
+    }
+
+    // 401 — token expired and refresh failed
+    if (error.response?.status === 401) {
+      // If auth enabled: logout user
+      // useAuthStore.getState().logout();
+    }
+
+    return Promise.reject(error);
+  },
+);
+
+// ── Dev logging ─────────────────────────────────────────────
+if (__DEV__) {
+  apiClient.interceptors.request.use((config) => {
+    console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`);
+    return config;
+  });
+}
+
+export default apiClient;
+```
+
+> **Auth interceptor:** The request interceptor that adds `Bearer` token is only included when OIDC auth is enabled. If the app has no auth, remove the `useAuthStore` import and request interceptor block.
+
+#### `src/lib/supabase.ts` — Supabase Client (supabase only)
+
+```typescript
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+```
+
+#### Service Template — `src/services/api/[resource].ts`
+
+Create one file per resource/entity. This is the pattern Copilot follows:
+
+```typescript
+import apiClient from "@/lib/api-client";
+// For Supabase: import { supabase } from "@/lib/supabase";
+
+// ── Types ───────────────────────────────────────────────────
+export interface Resource {
+  id: string;
+  name: string;
+  // ... add fields from API response
+}
+
+export interface CreateResourceInput {
+  name: string;
+  // ... add fields for creation
+}
+
+// ── API Functions ───────────────────────────────────────────
+export async function getResources(): Promise<Resource[]> {
+  const { data } = await apiClient.get<Resource[]>("/resources");
+  return data;
+}
+
+export async function getResourceById(id: string): Promise<Resource> {
+  const { data } = await apiClient.get<Resource>(`/resources/${id}`);
+  return data;
+}
+
+export async function createResource(
+  input: CreateResourceInput,
+): Promise<Resource> {
+  const { data } = await apiClient.post<Resource>("/resources", input);
+  return data;
+}
+
+export async function updateResource(
+  id: string,
+  input: Partial<CreateResourceInput>,
+): Promise<Resource> {
+  const { data } = await apiClient.put<Resource>(`/resources/${id}`, input);
+  return data;
+}
+
+export async function deleteResource(id: string): Promise<void> {
+  await apiClient.delete(`/resources/${id}`);
+}
+```
+
+> **Swagger:** When a Swagger/OpenAPI spec URL is provided, Copilot fetches the spec, reads endpoints and schemas, then creates service files and TypeScript types based on the spec. No automatic code generation tool is used — Copilot writes the code manually based on the spec.
+
+#### React Query Hook Template — `src/hooks/use-[resource].ts`
+
+```typescript
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getResources,
+  getResourceById,
+  createResource,
+  updateResource,
+  deleteResource,
+  type Resource,
+  type CreateResourceInput,
+} from "@/services/api/resources";
+
+const QUERY_KEY = ["resources"];
+
+export function useResources() {
+  return useQuery<Resource[]>({
+    queryKey: QUERY_KEY,
+    queryFn: getResources,
+  });
+}
+
+export function useResource(id: string) {
+  return useQuery<Resource>({
+    queryKey: [...QUERY_KEY, id],
+    queryFn: () => getResourceById(id),
+    enabled: !!id,
+  });
+}
+
+export function useCreateResource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateResourceInput) => createResource(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+  });
+}
+
+export function useUpdateResource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: Partial<CreateResourceInput>;
+    }) => updateResource(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+  });
+}
+
+export function useDeleteResource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteResource(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+    },
+  });
+}
+```
+
+#### `_layout.tsx` Integration
+
+```tsx
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/query-client";
+
+export default function RootLayout() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {/* ... rest of providers */}
+    </QueryClientProvider>
+  );
+}
+```
+
+#### Usage Example in Screens
+
+```tsx
+import { useResources, useCreateResource } from "@/hooks/use-resources";
+import { ActivityIndicator, FlatList, Text, View } from "react-native";
+
+export default function ResourceListScreen() {
+  const { data: resources, isLoading, error } = useResources();
+  const createMutation = useCreateResource();
+
+  if (isLoading) return <ActivityIndicator />;
+  if (error) return <Text>Error: {error.message}</Text>;
+
+  return (
+    <FlatList
+      data={resources}
+      keyExtractor={(item) => item.id}
+      renderItem={({ item }) => <Text>{item.name}</Text>}
+    />
+  );
+}
+```
+
+#### Important Notes
+
+| Topic                     | Detail                                                                                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Swagger spec**          | Copilot reads the spec URL, parses endpoints & schemas, then writes service files + types manually. No codegen tool is used                        |
+| **Auth interceptor**      | Only included when OIDC auth is enabled. Uses `useAuthStore.getState().getValidAccessToken()` for automatic token injection                        |
+| **401 handling**          | Response interceptor catches 401 errors. When auth enabled, triggers logout                                                                        |
+| **QueryClientProvider**   | Wraps the entire app (outermost provider). Only added when data source is swagger/rest/supabase                                                    |
+| **staleTime**             | Default 5 minutes — adjust per app needs                                                                                                           |
+| **Supabase + OIDC**       | If both Supabase and OIDC auth are enabled, Supabase client should use the OIDC access token. Set `supabase.auth.setSession()` with the OIDC token |
+| **Static data**           | When `static` is chosen, data lives in `src/constants/` as TypeScript files. No API client, no React Query                                         |
+| **Expo Go**               | Works fine — no native modules required for data fetching                                                                                          |
+| **@tanstack/react-query** | Shared between data source and auth sections — only installed once                                                                                 |
+
 ### App Flow (CRITICAL — ALWAYS FOLLOW THIS ORDER)
 
 ```
@@ -2988,20 +3310,27 @@ const handleResetOnboarding = async () => {
 ## Context Providers
 
 ```tsx
-<GestureHandlerRootView style={{ flex: 1 }}>
-  <ThemeProvider>
-    <OnboardingProvider>
-      <PurchasesProvider>
-        {/* ✅ App açılışında isPremium kontrol eder */}
-        <AdsProvider>
-          {/* AdsProvider, isPremium'u PurchasesProvider'dan okur */}
-          <Stack />
-        </AdsProvider>
-      </PurchasesProvider>
-    </OnboardingProvider>
-  </ThemeProvider>
-</GestureHandlerRootView>
+{
+  /* QueryClientProvider sadece data source (swagger/rest/supabase) seçilmişse eklenir */
+}
+<QueryClientProvider client={queryClient}>
+  <GestureHandlerRootView style={{ flex: 1 }}>
+    <ThemeProvider>
+      <OnboardingProvider>
+        <PurchasesProvider>
+          {/* ✅ App açılışında isPremium kontrol eder */}
+          <AdsProvider>
+            {/* AdsProvider, isPremium'u PurchasesProvider'dan okur */}
+            <Stack />
+          </AdsProvider>
+        </PurchasesProvider>
+      </OnboardingProvider>
+    </ThemeProvider>
+  </GestureHandlerRootView>
+</QueryClientProvider>;
 ```
+
+> **Note:** `QueryClientProvider` is only added when a data source (swagger/rest/supabase) is selected. If `static` or `none` was chosen, omit it.
 
 ## useColorScheme Hook
 
@@ -3056,7 +3385,10 @@ UI (useIntegratedAuth hook)
 
 ```bash
 npx expo install expo-auth-session expo-secure-store expo-web-browser
-bunx expo install zustand @tanstack/react-query
+bun add zustand
+# @tanstack/react-query is installed via the Data Source section if a data source is enabled.
+# If no data source but auth is needed, install it here:
+# bun add @tanstack/react-query
 ```
 
 ### Environment Variables (`.env`)
