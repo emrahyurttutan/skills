@@ -323,11 +323,13 @@ Use `bun add` for non-Expo libraries:
 
 ```bash
 # Expo libraries
-npx expo install expo-iap expo-build-properties expo-tracking-transparency react-native-google-mobile-ads expo-notifications i18next react-i18next expo-localization react-native-reanimated expo-video expo-audio expo-sqlite expo-linear-gradient
+npx expo install expo-iap expo-build-properties expo-tracking-transparency react-native-google-mobile-ads expo-notifications expo-task-manager expo-background-fetch i18next react-i18next expo-localization react-native-reanimated expo-video expo-audio expo-sqlite expo-linear-gradient
 
 # Peer dependencies
 npx expo install react-native-screens react-native-reanimated react-native-gesture-handler react-native-safe-area-context react-native-svg
 ```
+
+> **Note:** `expo-task-manager` and `expo-background-fetch` are only needed when the app has local notifications. Skip them if the user answered NO to the notifications question.
 
 Libraries:
 
@@ -335,7 +337,9 @@ Libraries:
 - `expo-build-properties` (required by expo-iap)
 - `expo-tracking-transparency` (ATT — iOS App Tracking Transparency)
 - `react-native-google-mobile-ads` (AdMob)
-- `expo-notifications`
+- `expo-notifications` (local scheduled notifications)
+- `expo-task-manager` (background task definitions — if notifications enabled)
+- `expo-background-fetch` (periodic notification refresh — if notifications enabled)
 - `i18next` + `react-i18next` + `expo-localization`
 - `react-native-reanimated`
 - `expo-video` + `expo-audio`
@@ -1047,7 +1051,21 @@ When user asks to create an app, you MUST:
 4. **FOURTH ask: "Does the app need iOS/Android home screen widgets?"**
    - If **YES** → follow the [Widgets](#widgets-ios--android--optional) section after project setup
    - If **NO** → skip widgets entirely
-5. Create the project in the CURRENT directory using:
+5. **FIFTH ask: "Does the app need local push notifications?"**
+   - If **NO** → skip notifications entirely
+   - If **YES** → go to question 6
+6. **SIXTH ask: "How should notifications work?"**
+
+   | Option          | Description                                 | Example Apps                                |
+   | --------------- | ------------------------------------------- | ------------------------------------------- |
+   | **`daily`**     | Once a day at a fixed time                  | Reminders, daily summaries, motivation      |
+   | **`scheduled`** | Multiple times per day at data-driven times | Prayer times, stock alerts, calendar events |
+   - `daily` → implement `scheduleDailyNotification` + `useDailyNotification` hook
+   - `scheduled` → implement `scheduleNotificationsForDays` + data adapter + `useScheduledNotifications` hook
+   - Both → implement both; user picks active mode from settings
+   - Follow the [Notifications](#notifications) section after project setup
+
+7. Create the project in the CURRENT directory using:
 
 ```bash
 bunx create-expo -t default@next app-name
@@ -1079,7 +1097,7 @@ bunx create-expo -t default@next app-name
 - **Translations**: i18next, react-i18next
 - **Purchases**: expo-iap (expo-iap)
 - **Advertisements**: Google AdMob (react-native-google-mobile-ads)
-- **Notifications**: expo-notifications
+- **Notifications** _(optional)_: expo-notifications + expo-task-manager + expo-background-fetch
 - **Animations**: react-native-reanimated
 - **Storage**: localStorage via expo-sqlite polyfill
 - **Authentication** _(optional)_: OIDC via expo-auth-session + expo-secure-store + zustand
@@ -1127,10 +1145,11 @@ project-root/
 │   │   ├── authStore.ts
 │   │   └── useIntegratedAuth.ts
 │   ├── hooks/
-│   │   ├── use-notifications.ts
+│   │   ├── use-notifications.ts      # (if notifications enabled)
 │   │   └── use-color-scheme.ts
 │   ├── lib/
-│   │   ├── notifications.ts
+│   │   ├── notifications.ts          # (if notifications enabled)
+│   │   ├── background-tasks.ts       # (if notifications enabled)
 │   │   ├── purchases.ts
 │   │   ├── ads.ts
 │   │   ├── analytics.ts              # (if Firebase enabled)
@@ -1664,8 +1683,498 @@ const styles = StyleSheet.create({
 
 ### Notifications
 
-- Files: `src/lib/notifications.ts`, `src/hooks/use-notifications.ts`
-- iOS requires push notification entitlement
+> **Only implement this section if the user answered YES to "Does the app need local push notifications?"**
+
+#### iOS 64 Notification Limit
+
+iOS allows at most **64 scheduled notifications** at once. Pick the right strategy:
+
+| Mode                | Calculation        | iOS Limit                                                   |
+| ------------------- | ------------------ | ----------------------------------------------------------- |
+| `daily` (1/day)     | `1 × 64 = 64 days` | ✅ Schedule up to 64 days at once                           |
+| `scheduled` (N/day) | `N × days ≤ 64`    | `days = floor(64 / N)` — background fetch slides the window |
+
+Examples:
+
+- 5 events/day → `floor(64/5) = 12` days (60 notifications)
+- 3 events/day → `floor(64/3) = 21` days (63 notifications)
+- 1 event/day → 64 days at once, background fetch not required
+
+#### app.json Configuration (REQUIRED)
+
+```json
+{
+  "expo": {
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#6C63FF",
+          "androidMode": "default",
+          "androidCollapsedTitle": "Bildirimler"
+        }
+      ]
+    ],
+    "android": {
+      "permissions": ["RECEIVE_BOOT_COMPLETED"]
+    },
+    "ios": {
+      "infoPlist": {
+        "UIBackgroundModes": ["fetch", "background-processing"]
+      }
+    }
+  }
+}
+```
+
+> **`androidCollapsedTitle`** and notification content strings should be localized per app.
+
+#### `src/lib/notifications.ts` — Full Implementation
+
+```typescript
+import * as Notifications from "expo-notifications";
+import "expo-sqlite/localStorage/install";
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+export async function requestNotificationPermissions(): Promise<boolean> {
+  const { status: existing } = await Notifications.getPermissionsAsync();
+  if (existing === "granted") return true;
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === "granted";
+}
+
+export async function cancelAllNotifications(): Promise<void> {
+  await Notifications.cancelAllScheduledNotificationsAsync();
+}
+
+export async function getScheduledNotificationCount(): Promise<number> {
+  const list = await Notifications.getAllScheduledNotificationsAsync();
+  return list.length;
+}
+
+// ── MOD A: daily ─────────────────────────────────────────────
+/**
+ * Schedule one notification per day at a fixed time.
+ * iOS: up to 64 days at once (1 × 64 = 64, under the limit).
+ * Android: pass days=90 for longer coverage.
+ *
+ * Example:
+ *   scheduleDailyNotification(9, 0, "Daily Reminder", "Check today's goal!")
+ */
+export async function scheduleDailyNotification(
+  hour: number,
+  minute: number,
+  title: string,
+  body: string,
+  days: number = 64,
+): Promise<void> {
+  await cancelAllNotifications();
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  for (let dayOffset = 0; dayOffset < days; dayOffset++) {
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + dayOffset);
+    targetDate.setHours(hour, minute, 0, 0);
+    if (targetDate <= now) continue;
+
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body, sound: true },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: targetDate,
+      },
+    });
+  }
+
+  // Cache for background task refresh
+  globalThis.localStorage.setItem("notification_mode", "daily");
+  globalThis.localStorage.setItem(
+    "notification_daily_config",
+    JSON.stringify({ hour, minute, title, body, days }),
+  );
+}
+
+// ── MOD B: scheduled ─────────────────────────────────────────
+export interface NotificationEvent {
+  time: string; // "HH:mm"
+  title: string;
+  body: string;
+}
+
+export interface DayEvents {
+  date: string; // "YYYY-MM-DD"
+  times: NotificationEvent[];
+}
+
+/**
+ * Schedule multiple notifications per day from dynamic data.
+ * iOS limit: floor(64 / eventsPerDay) days — background fetch slides the window.
+ * Example: 5 events/day → 12 days (60 notifications).
+ *
+ * events shape:
+ * [
+ *   {
+ *     date: "2026-03-04",
+ *     times: [
+ *       { time: "06:12", title: "Event A", body: "Event A started." },
+ *       { time: "13:05", title: "Event B", body: "Event B started." },
+ *     ]
+ *   }
+ * ]
+ */
+export async function scheduleNotificationsForDays(
+  events: DayEvents[],
+  days: number = 12,
+): Promise<void> {
+  await cancelAllNotifications();
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  for (let dayOffset = 0; dayOffset < days; dayOffset++) {
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + dayOffset);
+
+    const isoDate = targetDate.toISOString().slice(0, 10);
+    const dayData = events.find((e) => e.date === isoDate);
+    if (!dayData) continue;
+
+    for (const { time, title, body } of dayData.times) {
+      const [hours, minutes] = time.split(":").map(Number);
+      const notifTime = new Date(targetDate);
+      notifTime.setHours(hours, minutes, 0, 0);
+      if (notifTime <= now) continue;
+
+      await Notifications.scheduleNotificationAsync({
+        content: { title, body, sound: true },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: notifTime,
+        },
+      });
+    }
+  }
+
+  // Cache for background task refresh
+  globalThis.localStorage.setItem("notification_mode", "scheduled");
+  globalThis.localStorage.setItem(
+    "notification_events_cache",
+    JSON.stringify(events),
+  );
+  globalThis.localStorage.setItem("notification_events_days", String(days));
+}
+```
+
+#### Data Adapter — Converting App Data to `DayEvents[]`
+
+Write a project-specific adapter to convert your API response to `DayEvents[]`:
+
+```typescript
+import type { DayEvents } from "@/lib/notifications";
+
+// Example: prayer times API response → DayEvents[]
+export function prayerTimesToEvents(apiData: any[]): DayEvents[] {
+  return apiData.map((day) => ({
+    date: day.tarih, // "YYYY-MM-DD"
+    times: [
+      {
+        time: day.Sabah,
+        title: "Sabah Vakti",
+        body: "Sabah namazı vakti girdi.",
+      },
+      { time: day.Ogle, title: "Öğle Vakti", body: "Öğle namazı vakti girdi." },
+      {
+        time: day.Ikindi,
+        title: "İkindi Vakti",
+        body: "İkindi namazı vakti girdi.",
+      },
+      {
+        time: day.Aksam,
+        title: "Akşam Vakti",
+        body: "Akşam namazı vakti girdi.",
+      },
+      {
+        time: day.Yatsi,
+        title: "Yatsı Vakti",
+        body: "Yatsı namazı vakti girdi.",
+      },
+    ],
+  }));
+}
+
+// Example: stock alarms → DayEvents[]
+export function stockAlarmsToEvents(alarms: any[]): DayEvents[] {
+  const grouped: Record<string, DayEvents> = {};
+  for (const alarm of alarms) {
+    if (!grouped[alarm.date])
+      grouped[alarm.date] = { date: alarm.date, times: [] };
+    grouped[alarm.date].times.push({
+      time: alarm.time,
+      title: alarm.symbol,
+      body: `${alarm.symbol} reached target price: ${alarm.price}`,
+    });
+  }
+  return Object.values(grouped);
+}
+```
+
+#### `src/lib/background-tasks.ts` — Background Refresh (NEW FILE)
+
+```typescript
+import * as BackgroundFetch from "expo-background-fetch";
+import * as TaskManager from "expo-task-manager";
+import {
+  scheduleDailyNotification,
+  scheduleNotificationsForDays,
+} from "@/lib/notifications";
+import "expo-sqlite/localStorage/install";
+
+export const BACKGROUND_FETCH_TASK = "notification-refresh";
+
+// IMPORTANT: defineTask must run at module level (outside React tree).
+// Add this to _layout.tsx as a side-effect import:
+//   import "@/lib/background-tasks";
+TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
+  try {
+    const enabled = globalThis.localStorage.getItem("notifications_enabled");
+    if (enabled !== "true") return BackgroundFetch.BackgroundFetchResult.NoData;
+
+    const mode = globalThis.localStorage.getItem("notification_mode");
+
+    if (mode === "daily") {
+      const raw = globalThis.localStorage.getItem("notification_daily_config");
+      if (!raw) return BackgroundFetch.BackgroundFetchResult.NoData;
+      const { hour, minute, title, body, days } = JSON.parse(raw);
+      await scheduleDailyNotification(hour, minute, title, body, days);
+      return BackgroundFetch.BackgroundFetchResult.NewData;
+    }
+
+    if (mode === "scheduled") {
+      const cached = globalThis.localStorage.getItem(
+        "notification_events_cache",
+      );
+      if (!cached) return BackgroundFetch.BackgroundFetchResult.NoData;
+      const events = JSON.parse(cached);
+      const days = parseInt(
+        globalThis.localStorage.getItem("notification_events_days") ?? "12",
+        10,
+      );
+      await scheduleNotificationsForDays(events, days);
+      return BackgroundFetch.BackgroundFetchResult.NewData;
+    }
+
+    return BackgroundFetch.BackgroundFetchResult.NoData;
+  } catch {
+    return BackgroundFetch.BackgroundFetchResult.Failed;
+  }
+});
+
+/**
+ * Register the background fetch task.
+ * Call once in _layout.tsx useEffect on app startup.
+ * iOS minimum: 15 minutes (system may optimize to longer intervals).
+ * Android: more flexible scheduling.
+ */
+export async function registerBackgroundFetchAsync(): Promise<void> {
+  try {
+    const status = await BackgroundFetch.getStatusAsync();
+    if (
+      status === BackgroundFetch.BackgroundFetchStatus.Restricted ||
+      status === BackgroundFetch.BackgroundFetchStatus.Denied
+    ) {
+      return;
+    }
+    const isRegistered = await TaskManager.isTaskRegisteredAsync(
+      BACKGROUND_FETCH_TASK,
+    );
+    if (isRegistered) return;
+
+    await BackgroundFetch.registerTaskAsync(BACKGROUND_FETCH_TASK, {
+      minimumInterval: 15 * 60, // 15 minutes in seconds
+      stopOnTerminate: false, // Android: keep running after app close
+      startOnBoot: true, // Android: restart task on device reboot
+    });
+  } catch (err) {
+    console.warn("[BackgroundFetch] Registration failed:", err);
+  }
+}
+```
+
+#### `src/hooks/use-notifications.ts` — Hooks
+
+```typescript
+import { useEffect, useState } from "react";
+import {
+  cancelAllNotifications,
+  requestNotificationPermissions,
+  scheduleDailyNotification,
+  scheduleNotificationsForDays,
+  type DayEvents,
+} from "@/lib/notifications";
+import "expo-sqlite/localStorage/install";
+
+export interface DailyNotificationConfig {
+  hour: number;
+  minute: number;
+  title: string;
+  body: string;
+  days?: number;
+}
+
+// MOD A: once a day, fixed time
+export function useDailyNotification(config: DailyNotificationConfig) {
+  const [enabled, setEnabled] = useState(
+    () => globalThis.localStorage.getItem("notifications_enabled") === "true",
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+    requestNotificationPermissions().then((granted) => {
+      if (granted)
+        scheduleDailyNotification(
+          config.hour,
+          config.minute,
+          config.title,
+          config.body,
+          config.days,
+        );
+    });
+  }, [enabled]);
+
+  const toggle = async (value: boolean) => {
+    if (value) {
+      const granted = await requestNotificationPermissions();
+      if (!granted) return;
+      await scheduleDailyNotification(
+        config.hour,
+        config.minute,
+        config.title,
+        config.body,
+        config.days,
+      );
+    } else {
+      await cancelAllNotifications();
+    }
+    setEnabled(value);
+    globalThis.localStorage.setItem(
+      "notifications_enabled",
+      value ? "true" : "false",
+    );
+  };
+
+  return { notificationsEnabled: enabled, toggle };
+}
+
+// MOD B: multiple times per day, dynamic data
+export function useScheduledNotifications(events?: DayEvents[], days?: number) {
+  const [enabled, setEnabled] = useState(
+    () => globalThis.localStorage.getItem("notifications_enabled") === "true",
+  );
+
+  useEffect(() => {
+    if (!enabled || !events?.length) return;
+    requestNotificationPermissions().then((granted) => {
+      if (granted) scheduleNotificationsForDays(events, days);
+    });
+  }, [enabled, events]);
+
+  const toggle = async (value: boolean) => {
+    if (value) {
+      const granted = await requestNotificationPermissions();
+      if (!granted) return;
+      if (events?.length) await scheduleNotificationsForDays(events, days);
+    } else {
+      await cancelAllNotifications();
+    }
+    setEnabled(value);
+    globalThis.localStorage.setItem(
+      "notifications_enabled",
+      value ? "true" : "false",
+    );
+  };
+
+  return { notificationsEnabled: enabled, toggle };
+}
+```
+
+#### `_layout.tsx` Integration
+
+```tsx
+import "@/lib/background-tasks"; // side-effect: registers TaskManager task at module load
+
+import { registerBackgroundFetchAsync } from "@/lib/background-tasks";
+import { useEffect } from "react";
+
+export default function RootLayout() {
+  useEffect(() => {
+    registerBackgroundFetchAsync();
+  }, []);
+
+  // ... rest of layout
+}
+```
+
+#### Settings Screen Integration
+
+**MOD A — daily:**
+
+```tsx
+import { useDailyNotification } from "@/hooks/use-notifications";
+
+const { notificationsEnabled, toggle } = useDailyNotification({
+  hour: 9,
+  minute: 0,
+  title: "Daily Reminder",
+  body: "Check today's goal!",
+});
+
+<Switch value={notificationsEnabled} onValueChange={toggle} />;
+```
+
+**MOD B — scheduled (dynamic data):**
+
+```tsx
+import { useScheduledNotifications } from "@/hooks/use-notifications";
+
+const events = myDataAdapter(fetchedData); // returns DayEvents[]
+const { notificationsEnabled, toggle } = useScheduledNotifications(events, 12);
+
+<Switch value={notificationsEnabled} onValueChange={toggle} />;
+```
+
+#### localStorage Cache Keys
+
+| Key                         | Value                                               | Mode             |
+| --------------------------- | --------------------------------------------------- | ---------------- |
+| `notifications_enabled`     | `"true"` \| `"false"`                               | Both             |
+| `notification_mode`         | `"daily"` \| `"scheduled"`                          | Both             |
+| `notification_daily_config` | `JSON.stringify({hour, minute, title, body, days})` | `daily` only     |
+| `notification_events_cache` | `JSON.stringify(DayEvents[])`                       | `scheduled` only |
+| `notification_events_days`  | `"12"` \| `"21"` etc.                               | `scheduled` only |
+
+#### Important Notes
+
+| Topic                          | Detail                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------ |
+| **iOS 64 limit — daily**       | `1 × 64 = 64 days` — schedule all at once, background fetch not required                         |
+| **iOS 64 limit — scheduled**   | `floor(64 / N)` days — N = events per day; background fetch slides the window forward            |
+| **Background fetch interval**  | iOS minimum 15 min (system may optimize to longer intervals); Android more flexible              |
+| **`RECEIVE_BOOT_COMPLETED`**   | Android loses scheduled notifications on device reboot; `startOnBoot: true` keeps the task alive |
+| **Import order**               | `background-tasks.ts` must be imported before any React component renders → top of `_layout.tsx` |
+| **`UIBackgroundModes: fetch`** | Required in `app.json infoPlist` for iOS background fetch                                        |
+| **Expo Go**                    | Background fetch does NOT work in Expo Go — use `eas build --profile development`                |
+| **Debug**                      | `getScheduledNotificationCount()` → `daily`: ≤ 64, `scheduled` (5 events/day): ≤ 60              |
+| **Data adapter**               | Write a project-specific adapter to convert API data to `DayEvents[]` (examples above)           |
 
 ### App Flow (CRITICAL — ALWAYS FOLLOW THIS ORDER)
 
