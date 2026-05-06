@@ -22,21 +22,22 @@ When creating a new Expo project, you MUST include ALL of the following:
 
 ### Onboarding Screen Implementation (REQUIRED)
 
-The onboarding screen MUST have a fullscreen background video. Use a **local asset** (`require("@/assets/...")`). The video is looped, muted, and played automatically.
+The onboarding screen uses a **fullscreen background image** with a gradient overlay. Use a **local asset** (`require("@/assets/...")`). Slides are driven by a `FlatList` with `pagingEnabled`.
 
 Full implementation of `src/app/onboarding.tsx`:
 
 ```tsx
 import { useOnboarding } from "@/context/onboarding-context";
+import { Analytics } from "@/lib/analytics";
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useVideoPlayer, VideoView } from "expo-video";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Dimensions,
   FlatList,
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -44,35 +45,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const VIDEO_SOURCE = require("@/assets/onboarding.mp4");
+// Background image — replace with your own asset
+const BG_IMAGE = require("@/assets/education.jpg");
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const SLIDES = [
-  {
-    key: "1",
-    titleKey: "onboarding.slide1.title",
-    descKey: "onboarding.slide1.description",
-    icon: "access-time",
-  },
-  {
-    key: "2",
-    titleKey: "onboarding.slide2.title",
-    descKey: "onboarding.slide2.description",
-    icon: "explore",
-  },
-  {
-    key: "3",
-    titleKey: "onboarding.slide3.title",
-    descKey: "onboarding.slide3.description",
-    icon: "calendar-today",
-  },
-  {
-    key: "4",
-    titleKey: "onboarding.slide4.title",
-    descKey: "onboarding.slide4.description",
-    icon: "lock",
-  },
+  { key: "1", titleKey: "onboarding.slide1.title", descKey: "onboarding.slide1.description", icon: "history-edu" as const },
+  { key: "2", titleKey: "onboarding.slide2.title", descKey: "onboarding.slide2.description", icon: "category" as const },
+  { key: "3", titleKey: "onboarding.slide3.title", descKey: "onboarding.slide3.description", icon: "calendar-today" as const },
+  { key: "4", titleKey: "onboarding.slide4.title", descKey: "onboarding.slide4.description", icon: "workspace-premium" as const },
 ];
 
 export default function OnboardingScreen() {
@@ -81,89 +63,55 @@ export default function OnboardingScreen() {
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
 
-  const player = useVideoPlayer(VIDEO_SOURCE, (p) => {
-    p.loop = true;
-    p.muted = true;
-    p.play();
-  });
+  useEffect(() => { Analytics.logScreenView("OnboardingScreen"); }, []);
 
   const handleNext = () => {
     if (activeIndex < SLIDES.length - 1) {
-      flatListRef.current?.scrollToIndex({
-        index: activeIndex + 1,
-        animated: true,
-      });
-      setActiveIndex(activeIndex + 1);
+      const next = activeIndex + 1;
+      flatListRef.current?.scrollToIndex({ index: next, animated: true });
+      setActiveIndex(next);
+      Analytics.logOnboardingSlideView(next);
     } else {
       handleComplete();
     }
   };
 
   const handleComplete = async () => {
+    Analytics.logOnboardingCompleted(activeIndex < SLIDES.length - 1);
     await setOnboardingCompleted(true);
-    router.replace("/paywall");
+    router.replace("/notification-permission"); // → then /paywall
   };
 
   const isLast = activeIndex === SLIDES.length - 1;
 
   return (
     <View style={styles.container}>
-      {/* Background video */}
-      <VideoView
-        player={player}
-        style={StyleSheet.absoluteFill}
-        contentFit="cover"
-        nativeControls={false}
-      />
-      {/* Gradient overlay */}
+      <Image source={BG_IMAGE} style={StyleSheet.absoluteFill} resizeMode="contain" />
       <LinearGradient
-        colors={["rgba(0,0,0,0.3)", "rgba(0,0,0,0.7)", "rgba(0,0,0,0.9)"]}
+        colors={["rgba(0,0,0,0.15)", "rgba(0,0,0,0.5)", "rgba(0,0,0,0.82)"]}
+        locations={[0, 0.45, 1]}
         style={StyleSheet.absoluteFill}
       />
-
       <SafeAreaView style={styles.safeArea}>
-        {/* Skip button */}
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={handleComplete} style={styles.skipButton}>
+          <TouchableOpacity testID="skip-button" onPress={handleComplete} style={styles.skipButton}>
             <Text style={styles.skipButtonText}>{t("onboarding.skip")}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Slides */}
         <FlatList
           ref={flatListRef}
           data={SLIDES}
-          horizontal
-          pagingEnabled
-          scrollEnabled
+          horizontal pagingEnabled scrollEnabled
           showsHorizontalScrollIndicator={false}
           keyExtractor={(item) => item.key}
           onMomentumScrollEnd={(e) => {
-            const index = Math.round(
-              e.nativeEvent.contentOffset.x / SCREEN_WIDTH,
-            );
-            setActiveIndex(index);
+            setActiveIndex(Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH));
           }}
           renderItem={({ item }) => (
             <View style={styles.slide}>
-              <View
-                style={{
-                  width: 96,
-                  height: 96,
-                  borderRadius: 48,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginBottom: 32,
-                  backgroundColor: "rgba(65,114,157,0.35)",
-                  borderWidth: 1.5,
-                  borderColor: "rgba(65,114,157,0.6)",
-                }}
-              >
-                <MaterialIcons
-                  name={item.icon as any}
-                  size={52}
-                  color="#FFFFFF"
-                />
+              <View style={styles.iconWrap}>
+                <MaterialIcons name={item.icon} size={52} color="#FFFFFF" />
               </View>
               <Text style={styles.slideTitle}>{t(item.titleKey)}</Text>
               <Text style={styles.slideDesc}>{t(item.descKey)}</Text>
@@ -171,22 +119,14 @@ export default function OnboardingScreen() {
           )}
         />
 
-        {/* Dots */}
         <View style={styles.dotsContainer}>
           {SLIDES.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.dot,
-                i === activeIndex ? styles.dotActive : styles.dotInactive,
-              ]}
-            />
+            <View key={i} style={[styles.dot, i === activeIndex ? styles.dotActive : styles.dotInactive]} />
           ))}
         </View>
 
-        {/* CTA */}
         <View style={styles.ctaContainer}>
-          <TouchableOpacity onPress={handleNext} style={styles.ctaButton}>
+          <TouchableOpacity testID="get-started-button" onPress={handleNext} style={styles.ctaButton}>
             <Text style={styles.ctaButtonText}>
               {isLast ? t("onboarding.getStarted") : t("onboarding.next")}
             </Text>
@@ -200,88 +140,30 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   safeArea: { flex: 1 },
-  topBar: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingHorizontal: 20,
-    paddingTop: 8,
-  },
-  slide: {
-    width: SCREEN_WIDTH,
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 40,
-  },
-  skipButton: {
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  skipButtonText: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  slideTitle: {
-    fontSize: 36,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    textAlign: "center",
-    marginBottom: 16,
-  },
-  slideDesc: {
-    fontSize: 17,
-    color: "rgba(255,255,255,0.75)",
-    textAlign: "center",
-  },
-  dotsContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-    marginBottom: 24,
-  },
-  dot: {
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: {
-    width: 24,
-    backgroundColor: "#FFFFFF",
-  },
-  dotInactive: {
-    width: 8,
-    backgroundColor: "rgba(255,255,255,0.3)",
-  },
-  ctaContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-  },
-  ctaButton: {
-    width: "100%",
-    backgroundColor: "#6C63FF",
-    borderRadius: 16,
-    alignItems: "center",
-    paddingVertical: 16,
-  },
-  ctaButtonText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "700",
-  },
+  topBar: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 20, paddingTop: 8 },
+  slide: { width: SCREEN_WIDTH, flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
+  iconWrap: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center", marginBottom: 32, backgroundColor: "rgba(108,99,255,0.35)", borderWidth: 1.5, borderColor: "rgba(108,99,255,0.6)" },
+  skipButton: { borderWidth: 1, borderColor: "rgba(255,255,255,0.25)", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
+  skipButtonText: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontWeight: "600" },
+  slideTitle: { color: "#FFFFFF", fontSize: 26, fontWeight: "700", textAlign: "center", marginBottom: 12 },
+  slideDesc: { color: "rgba(255,255,255,0.75)", fontSize: 15, textAlign: "center" },
+  dotsContainer: { flexDirection: "row", justifyContent: "center", gap: 8, paddingVertical: 20 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  dotActive: { backgroundColor: "#FFFFFF", width: 24 },
+  dotInactive: { backgroundColor: "rgba(255,255,255,0.35)" },
+  ctaContainer: { paddingHorizontal: 24, paddingBottom: 24 },
+  ctaButton: { backgroundColor: "#185996", borderRadius: 14, paddingVertical: 16, alignItems: "center" },
+  ctaButtonText: { color: "#FFFFFF", fontSize: 17, fontWeight: "700" },
 });
 ```
 
 > **Notes:**
 >
-> - Place your onboarding video at `assets/onboarding.mp4` (adjust the `require` path to match the actual file)
+> - Background: `Image` + `LinearGradient` overlay. For video background, swap `Image` → `VideoView` from `expo-video`
+> - After onboarding: `router.replace("/notification-permission")` → notification-permission screen navigates to `/paywall`
 > - `SafeAreaView` is from `react-native-safe-area-context`, NOT `react-native`
-> - Slide icons use `@expo/vector-icons` `MaterialIcons` — adjust icon names per app theme
-> - Slides array and icon names should be customized per app
-> - Add required i18n keys: `onboarding.slide1.title`, `onboarding.slide1.description`, etc., plus `onboarding.skip`, `onboarding.next`, `onboarding.getStarted`
+> - Slide icons use `@expo/vector-icons` `MaterialIcons` — adjust icon names and count per app
+> - Add i18n keys: `onboarding.slide1.title`, `onboarding.slide1.description`, etc., plus `onboarding.skip`, `onboarding.next`, `onboarding.getStarted`
 
 ### Required Navigation (ALWAYS USE)
 
@@ -432,15 +314,11 @@ All ad formats are **hidden for premium users** via `shouldShowAds`.
 Create `src/context/ads-context.tsx`:
 
 ```tsx
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { AppState, AppStateStatus } from "react-native";
+import { ADMOB_UNITS } from "@/constants/urls";
+import { usePurchases } from "@/context/purchases-context";
+import "expo-sqlite/localStorage/install";
+import React, { createContext, useCallback, useContext, useEffect, useRef } from "react";
+import { AppState, AppStateStatus, Platform } from "react-native";
 import {
   AdEventType,
   AppOpenAd,
@@ -449,33 +327,29 @@ import {
   RewardedAdEventType,
   TestIds,
 } from "react-native-google-mobile-ads";
-import { usePurchases } from "@/context/purchases-context";
-import "expo-sqlite/localStorage/install";
 
 // ── Ad Unit IDs ──────────────────────────────────────────────
+// Ad unit IDs come from urls.ts — never hardcode here
 export const AD_UNITS = {
-  banner: __DEV__ ? TestIds.BANNER : "ca-app-pub-xxxxxxxxxxxxxxxx/BANNER_ID",
-  interstitial: __DEV__
-    ? TestIds.INTERSTITIAL
-    : "ca-app-pub-xxxxxxxxxxxxxxxx/INTERSTITIAL_ID",
-  rewarded: __DEV__
-    ? TestIds.REWARDED
-    : "ca-app-pub-xxxxxxxxxxxxxxxx/REWARDED_ID",
-  appOpen: __DEV__
-    ? TestIds.APP_OPEN
-    : "ca-app-pub-xxxxxxxxxxxxxxxx/APP_OPEN_ID",
-  native: __DEV__ ? TestIds.NATIVE : "ca-app-pub-xxxxxxxxxxxxxxxx/NATIVE_ID",
+  banner:       __DEV__ ? TestIds.BANNER       : Platform.OS === "ios" ? ADMOB_UNITS.banner.ios       : ADMOB_UNITS.banner.android,
+  interstitial: __DEV__ ? TestIds.INTERSTITIAL : Platform.OS === "ios" ? ADMOB_UNITS.interstitial.ios : ADMOB_UNITS.interstitial.android,
+  rewarded:     __DEV__ ? TestIds.REWARDED     : Platform.OS === "ios" ? ADMOB_UNITS.rewarded.ios     : ADMOB_UNITS.rewarded.android,
+  appOpen:      __DEV__ ? TestIds.APP_OPEN     : Platform.OS === "ios" ? ADMOB_UNITS.appOpen.ios      : ADMOB_UNITS.appOpen.android,
+  native:       __DEV__ ? TestIds.NATIVE       : Platform.OS === "ios" ? ADMOB_UNITS.native.ios       : ADMOB_UNITS.native.android,
 };
 
 // ── Constants ────────────────────────────────────────────────
-const APP_OPEN_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
-const INTERSTITIAL_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
-const INTERSTITIAL_DAILY_CAP = 3;
+const APP_OPEN_COOLDOWN_MS       = 4 * 60 * 60 * 1000; // 4 hours
+const INTERSTITIAL_COOLDOWN_MS   = 5 * 60 * 1000;       // 5 minutes
+const INTERSTITIAL_DAILY_CAP     = 3;
+const INTERSTITIAL_QUIZ_INTERVAL = 3; // show only every N-th quiz completion
 
-const LS_APP_OPEN_KEY = "ads_app_open_last_shown";
-const LS_INTER_DATE_KEY = "ads_inter_last_date";
-const LS_INTER_COUNT_KEY = "ads_inter_count_today";
-const LS_INTER_TS_KEY = "ads_inter_last_ts";
+const LS_APP_OPEN_KEY          = "ads_app_open_last_shown";
+const LS_FIRST_LAUNCH_DONE_KEY = "ads_app_open_first_launch_done";
+const LS_INTER_DATE_KEY        = "ads_inter_last_date";
+const LS_INTER_COUNT_KEY       = "ads_inter_count_today";
+const LS_INTER_TS_KEY          = "ads_inter_last_ts";
+const LS_QUIZ_COMPLETE_KEY     = "ads_quiz_complete_count";
 
 function todayDateString() {
   return new Date().toISOString().slice(0, 10);
@@ -491,7 +365,7 @@ interface AdsContextValue {
 }
 
 const AdsContext = createContext<AdsContextValue>({
-  shouldShowAds: true,
+  shouldShowAds: false,
   bannerAdUnitId: AD_UNITS.banner,
   nativeAdUnitId: AD_UNITS.native,
   showInterstitial: () => {},
@@ -499,8 +373,9 @@ const AdsContext = createContext<AdsContextValue>({
 });
 
 export function AdsProvider({ children }: { children: React.ReactNode }) {
-  const { isPremium } = usePurchases();
-  const shouldShowAds = !isPremium;
+  const { isPremium, loading: purchasesLoading } = usePurchases();
+  // Don't show ads while premium status is loading, and never to premium users
+  const shouldShowAds = !isPremium && !purchasesLoading;
 
   // ── App Open ─────────────────────────────────────────────
   const appOpenAdRef = useRef<AppOpenAd | null>(null);
@@ -509,50 +384,39 @@ export function AdsProvider({ children }: { children: React.ReactNode }) {
 
   const loadAppOpen = useCallback(() => {
     if (!shouldShowAds) return;
-    const ad = AppOpenAd.createForAdRequest(AD_UNITS.appOpen, {
-      requestNonPersonalizedAdsOnly: true,
+    const ad = AppOpenAd.createForAdRequest(AD_UNITS.appOpen, { requestNonPersonalizedAdsOnly: true });
+    ad.addAdEventListener(AdEventType.LOADED, () => { appOpenLoadedRef.current = true; });
+    ad.addAdEventListener(AdEventType.CLOSED, () => {
+      appOpenLoadedRef.current = false; appOpenAdRef.current = null; loadAppOpen();
     });
-    ad.addEventHandler(AdEventType.LOADED, () => {
-      appOpenLoadedRef.current = true;
-    });
-    ad.addEventHandler(AdEventType.CLOSED, () => {
-      appOpenLoadedRef.current = false;
-      appOpenAdRef.current = null;
-      loadAppOpen();
-    });
-    ad.addEventHandler(AdEventType.ERROR, () => {
-      appOpenLoadedRef.current = false;
-      setTimeout(loadAppOpen, 30_000);
+    ad.addAdEventListener(AdEventType.ERROR, () => {
+      appOpenLoadedRef.current = false; setTimeout(loadAppOpen, 30_000);
     });
     ad.load();
     appOpenAdRef.current = ad;
   }, [shouldShowAds]);
 
   const tryShowAppOpen = useCallback(() => {
-    if (!shouldShowAds || !appOpenLoadedRef.current || !appOpenAdRef.current)
-      return;
+    if (!shouldShowAds || !appOpenLoadedRef.current || !appOpenAdRef.current) return;
     // Skip on first cold launch
-    if (isFirstLaunchRef.current) {
-      isFirstLaunchRef.current = false;
-      return;
-    }
+    if (isFirstLaunchRef.current) { isFirstLaunchRef.current = false; return; }
+    // Skip on first-ever install launch
+    const firstLaunchDone = globalThis.localStorage.getItem(LS_FIRST_LAUNCH_DONE_KEY);
+    if (!firstLaunchDone) { globalThis.localStorage.setItem(LS_FIRST_LAUNCH_DONE_KEY, "1"); return; }
+    // 4-hour cooldown
     const lastShown = globalThis.localStorage.getItem(LS_APP_OPEN_KEY);
     const now = Date.now();
-    if (lastShown && now - parseInt(lastShown, 10) < APP_OPEN_COOLDOWN_MS)
-      return;
+    if (lastShown && now - parseInt(lastShown, 10) < APP_OPEN_COOLDOWN_MS) return;
     globalThis.localStorage.setItem(LS_APP_OPEN_KEY, String(now));
     appOpenAdRef.current.show().catch(() => loadAppOpen());
   }, [shouldShowAds, loadAppOpen]);
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-
   useEffect(() => {
     if (!shouldShowAds) return;
     loadAppOpen();
     const sub = AppState.addEventListener("change", (state) => {
-      if (appStateRef.current !== "active" && state === "active") {
-        tryShowAppOpen();
-      }
+      if (appStateRef.current !== "active" && state === "active") tryShowAppOpen();
       appStateRef.current = state;
     });
     return () => sub.remove();
@@ -564,51 +428,33 @@ export function AdsProvider({ children }: { children: React.ReactNode }) {
 
   const loadInterstitial = useCallback(() => {
     if (!shouldShowAds) return;
-    const ad = InterstitialAd.createForAdRequest(AD_UNITS.interstitial, {
-      requestNonPersonalizedAdsOnly: true,
+    const ad = InterstitialAd.createForAdRequest(AD_UNITS.interstitial, { requestNonPersonalizedAdsOnly: true });
+    ad.addAdEventListener(AdEventType.LOADED, () => { interstitialLoadedRef.current = true; });
+    ad.addAdEventListener(AdEventType.CLOSED, () => {
+      interstitialLoadedRef.current = false; interstitialRef.current = null; loadInterstitial();
     });
-    ad.addEventHandler(AdEventType.LOADED, () => {
-      interstitialLoadedRef.current = true;
-    });
-    ad.addEventHandler(AdEventType.CLOSED, () => {
-      interstitialLoadedRef.current = false;
-      interstitialRef.current = null;
-      loadInterstitial();
-    });
-    ad.addEventHandler(AdEventType.ERROR, () => {
-      interstitialLoadedRef.current = false;
-    });
+    ad.addAdEventListener(AdEventType.ERROR, () => { interstitialLoadedRef.current = false; });
     ad.load();
     interstitialRef.current = ad;
   }, [shouldShowAds]);
 
-  useEffect(() => {
-    if (shouldShowAds) loadInterstitial();
-  }, [shouldShowAds, loadInterstitial]);
+  useEffect(() => { if (shouldShowAds) loadInterstitial(); }, [shouldShowAds, loadInterstitial]);
 
   const showInterstitial = useCallback(() => {
-    if (
-      !shouldShowAds ||
-      !interstitialLoadedRef.current ||
-      !interstitialRef.current
-    )
-      return;
+    if (!shouldShowAds || !interstitialLoadedRef.current || !interstitialRef.current) return;
+    // Quiz interval gate: only fire every N-th quiz
+    const quizCount = parseInt(globalThis.localStorage.getItem(LS_QUIZ_COMPLETE_KEY) ?? "0", 10) + 1;
+    globalThis.localStorage.setItem(LS_QUIZ_COMPLETE_KEY, String(quizCount));
+    if (quizCount % INTERSTITIAL_QUIZ_INTERVAL !== 0) return;
+    // Daily cap
     const now = Date.now();
     const today = todayDateString();
     const lastDate = globalThis.localStorage.getItem(LS_INTER_DATE_KEY);
-    let countToday = parseInt(
-      globalThis.localStorage.getItem(LS_INTER_COUNT_KEY) ?? "0",
-      10,
-    );
-    if (lastDate !== today) {
-      countToday = 0;
-      globalThis.localStorage.setItem(LS_INTER_DATE_KEY, today);
-    }
+    let countToday = parseInt(globalThis.localStorage.getItem(LS_INTER_COUNT_KEY) ?? "0", 10);
+    if (lastDate !== today) { countToday = 0; globalThis.localStorage.setItem(LS_INTER_DATE_KEY, today); }
     if (countToday >= INTERSTITIAL_DAILY_CAP) return;
-    const lastTs = parseInt(
-      globalThis.localStorage.getItem(LS_INTER_TS_KEY) ?? "0",
-      10,
-    );
+    // Cooldown
+    const lastTs = parseInt(globalThis.localStorage.getItem(LS_INTER_TS_KEY) ?? "0", 10);
     if (now - lastTs < INTERSTITIAL_COOLDOWN_MS) return;
     globalThis.localStorage.setItem(LS_INTER_TS_KEY, String(now));
     globalThis.localStorage.setItem(LS_INTER_COUNT_KEY, String(countToday + 1));
@@ -616,65 +462,42 @@ export function AdsProvider({ children }: { children: React.ReactNode }) {
   }, [shouldShowAds, loadInterstitial]);
 
   // ── Rewarded ──────────────────────────────────────────────
+  // Rewarded is always loaded — premium users can also use jokers/hints
   const rewardedRef = useRef<RewardedAd | null>(null);
   const rewardedLoadedRef = useRef(false);
 
   const loadRewarded = useCallback(() => {
-    if (!shouldShowAds) return;
-    const ad = RewardedAd.createForAdRequest(AD_UNITS.rewarded, {
-      requestNonPersonalizedAdsOnly: true,
+    const ad = RewardedAd.createForAdRequest(AD_UNITS.rewarded, { requestNonPersonalizedAdsOnly: true });
+    ad.addAdEventListener(RewardedAdEventType.LOADED, () => { rewardedLoadedRef.current = true; });
+    ad.addAdEventListener(AdEventType.CLOSED, () => {
+      rewardedLoadedRef.current = false; rewardedRef.current = null; loadRewarded();
     });
-    ad.addEventHandler(RewardedAdEventType.LOADED, () => {
-      rewardedLoadedRef.current = true;
-    });
-    ad.addEventHandler(AdEventType.CLOSED, () => {
-      rewardedLoadedRef.current = false;
-      rewardedRef.current = null;
-      loadRewarded();
-    });
-    ad.addEventHandler(AdEventType.ERROR, () => {
-      rewardedLoadedRef.current = false;
-    });
+    ad.addAdEventListener(AdEventType.ERROR, () => { rewardedLoadedRef.current = false; });
     ad.load();
     rewardedRef.current = ad;
-  }, [shouldShowAds]);
+  }, []);
 
-  useEffect(() => {
-    if (shouldShowAds) loadRewarded();
-  }, [shouldShowAds, loadRewarded]);
+  useEffect(() => { loadRewarded(); }, [loadRewarded]);
 
   const showRewarded = useCallback((): Promise<boolean> => {
     return new Promise((resolve) => {
-      if (
-        !shouldShowAds ||
-        !rewardedLoadedRef.current ||
-        !rewardedRef.current
-      ) {
-        resolve(false);
-        return;
-      }
+      if (!rewardedLoadedRef.current || !rewardedRef.current) { resolve(false); return; }
       const ad = rewardedRef.current!;
       let rewarded = false;
-      ad.addEventHandler(RewardedAdEventType.EARNED_REWARD, () => {
-        rewarded = true;
-      });
-      ad.addEventHandler(AdEventType.CLOSED, () => {
-        resolve(rewarded);
-      });
+      ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => { rewarded = true; });
+      ad.addAdEventListener(AdEventType.CLOSED, () => { resolve(rewarded); });
       ad.show().catch(() => resolve(false));
     });
-  }, [shouldShowAds]);
+  }, []);
 
   return (
-    <AdsContext.Provider
-      value={{
-        shouldShowAds,
-        bannerAdUnitId: AD_UNITS.banner,
-        nativeAdUnitId: AD_UNITS.native,
-        showInterstitial,
-        showRewarded,
-      }}
-    >
+    <AdsContext.Provider value={{
+      shouldShowAds,
+      bannerAdUnitId: AD_UNITS.banner,
+      nativeAdUnitId: AD_UNITS.native,
+      showInterstitial,
+      showRewarded,
+    }}>
       {children}
     </AdsContext.Provider>
   );
@@ -684,6 +507,15 @@ export function useAds() {
   return useContext(AdsContext);
 }
 ```
+
+**Key differences from the generic template:**
+- `AD_UNITS` reads from `ADMOB_UNITS` in `urls.ts` — no hardcoded IDs
+- `shouldShowAds = !isPremium && !purchasesLoading` — also blocks ads while premium status loads
+- Interstitial fires only every 3rd quiz completion (`INTERSTITIAL_QUIZ_INTERVAL = 3`)
+- Interstitial cooldown is 5 minutes (not 3)
+- Rewarded ad is always loaded — regardless of `shouldShowAds` — so premium users can still use jokers/hints
+- Two-layer first-launch guard: `isFirstLaunchRef` (cold start) + `LS_FIRST_LAUNCH_DONE_KEY` (install)
+- `addAdEventListener` instead of `addEventHandler`
 
 #### Banner Ad (Tab Layout)
 
@@ -1339,6 +1171,8 @@ eas submit --platform android
 Create `src/context/purchases-context.tsx`:
 
 ```tsx
+import { IAP_SKUS_ANDROID, IAP_SKUS_IOS } from "@/constants/urls";
+import type { ProductSubscription } from "expo-iap";
 import { finishTransaction, getAvailablePurchases, useIAP } from "expo-iap";
 import React, {
   createContext,
@@ -1347,50 +1181,66 @@ import React, {
   useEffect,
   useState,
 } from "react";
+import { Platform } from "react-native";
 
-// Replace these SKUs with the app's actual product IDs
-const SUBSCRIPTION_SKUS = [
-  Platform.OS === "ios" ? "com.company.appname.monthly" : "abonelik",
-  Platform.OS === "ios" ? "com.company.appname.yearly" : "abonelik",
-];
+// SKUs come from urls.ts — never hardcode here
+const SUBSCRIPTION_SKUS: string[] = Platform.OS === "ios"
+  ? [...IAP_SKUS_IOS]
+  : [...IAP_SKUS_ANDROID];
 
 interface PurchasesContextValue {
   isPremium: boolean;
   loading: boolean;
   premiumExpiryDate: Date | null;
   premiumProductId: string | null;
+  subscriptions: ProductSubscription[];
+  productsLoaded: boolean;
   refreshPremiumStatus: () => Promise<void>;
+  debugTogglePremium?: () => void; // __DEV__ only
 }
 
 const PurchasesContext = createContext<PurchasesContextValue>({
   isPremium: false,
-  loading: true,
+  loading: false,
   premiumExpiryDate: null,
   premiumProductId: null,
+  subscriptions: [],
+  productsLoaded: false,
   refreshPremiumStatus: async () => {},
 });
 
 export function PurchasesProvider({ children }: { children: React.ReactNode }) {
-  const { hasActiveSubscriptions } = useIAP();
+  const { connected, subscriptions, fetchProducts, hasActiveSubscriptions } = useIAP();
   const [isPremium, setIsPremium] = useState(false);
   const [loading, setLoading] = useState(true);
   const [premiumExpiryDate, setPremiumExpiryDate] = useState<Date | null>(null);
   const [premiumProductId, setPremiumProductId] = useState<string | null>(null);
+  const [productsLoaded, setProductsLoaded] = useState(false);
 
-  /** Acknowledge any transactions left unfinished (e.g. app killed mid-purchase). */
+  // DEV ONLY: toggle premium for UI testing
+  const debugTogglePremium = __DEV__
+    ? () => {
+        setIsPremium((prev) => {
+          const next = !prev;
+          if (next) {
+            setPremiumExpiryDate(new Date("2027-03-01T00:00:00.000Z"));
+            setPremiumProductId(Platform.OS === "ios" ? IAP_SKUS_IOS[2] : IAP_SKUS_ANDROID[0]);
+          } else {
+            setPremiumExpiryDate(null);
+            setPremiumProductId(null);
+          }
+          return next;
+        });
+      }
+    : undefined;
+
   const drainPendingTransactions = async () => {
     try {
       const purchases = await getAvailablePurchases();
       for (const purchase of purchases) {
-        try {
-          await finishTransaction({ purchase, isConsumable: false });
-        } catch {
-          // already acknowledged — safe to ignore
-        }
+        try { await finishTransaction({ purchase, isConsumable: false }); } catch {}
       }
-    } catch {
-      // IAP unavailable (simulator, no network, etc.)
-    }
+    } catch {}
   };
 
   const refreshPremiumStatus = useCallback(async () => {
@@ -1400,25 +1250,16 @@ export function PurchasesProvider({ children }: { children: React.ReactNode }) {
       setIsPremium(hasPremium);
 
       if (hasPremium) {
-        // Find the active subscription with the latest expiry date
         const purchases = await getAvailablePurchases();
-        const activeSubs = purchases.filter((p) =>
-          SUBSCRIPTION_SKUS.includes(p.productId),
-        );
-        // Pick the one with the furthest expiry (expirationDateIOS is ms epoch, iOS only)
+        const activeSubs = purchases.filter((p) => SUBSCRIPTION_SKUS.includes(p.productId));
         let bestExpiry: Date | null = null;
         let bestProductId: string | null = null;
         for (const p of activeSubs) {
-          const expMs = (p as { expirationDateIOS?: number | null })
-            .expirationDateIOS;
+          const expMs = (p as { expirationDateIOS?: number | null }).expirationDateIOS;
           if (expMs) {
             const d = new Date(expMs);
-            if (!bestExpiry || d > bestExpiry) {
-              bestExpiry = d;
-              bestProductId = p.productId;
-            }
+            if (!bestExpiry || d > bestExpiry) { bestExpiry = d; bestProductId = p.productId; }
           } else if (!bestProductId) {
-            // Android: no expirationDate field – record productId at least
             bestProductId = p.productId;
           }
         }
@@ -1435,19 +1276,24 @@ export function PurchasesProvider({ children }: { children: React.ReactNode }) {
     }
   }, [hasActiveSubscriptions]);
 
-  // ✅ App açıldığında otomatik olarak satın alma durumu kontrol edilir
+  useEffect(() => { refreshPremiumStatus(); }, [refreshPremiumStatus]);
+
+  // Load product list once store is connected
   useEffect(() => {
-    refreshPremiumStatus();
-  }, [refreshPremiumStatus]);
+    if (connected) {
+      fetchProducts({ skus: SUBSCRIPTION_SKUS, type: "subs" })
+        .then(() => setProductsLoaded(true))
+        .catch(() => setProductsLoaded(false));
+    }
+  }, [connected]);
 
   return (
     <PurchasesContext.Provider
       value={{
-        isPremium,
-        loading,
-        premiumExpiryDate,
-        premiumProductId,
+        isPremium, loading, premiumExpiryDate, premiumProductId,
+        subscriptions: subscriptions ?? [], productsLoaded,
         refreshPremiumStatus,
+        ...(debugTogglePremium ? { debugTogglePremium } : {}),
       }}
     >
       {children}
@@ -1462,19 +1308,18 @@ export function usePurchases() {
 
 > **Notes:**
 >
-> - `drainPendingTransactions` acknowledges unfinished transactions on startup (prevents stuck purchases)
-> - `premiumExpiryDate` is iOS only (`expirationDateIOS`); Android doesn't expose this field
-> - `premiumProductId` lets you know which plan (monthly/yearly) is active
-> - Replace `SUBSCRIPTION_SKUS` with the app's actual App Store / Play Store product IDs
+> - SKU'lar `urls.ts`'den gelir — burada hiçbir zaman hardcode edilmez
+> - `productsLoaded` paywall'da skeleton animasyonu için kullanılır
+> - `drainPendingTransactions` uygulama açılışında yarım kalan işlemleri temizler
+> - `premiumExpiryDate` sadece iOS'ta dolar (`expirationDateIOS`); Android bu alanı sunmaz
+> - `debugTogglePremium` yalnızca `__DEV__` modda bulunur — production build'e girmez
 
 After a successful purchase in `paywall.tsx`, always call `refreshPremiumStatus()`:
 
 ```tsx
-const { refreshPremiumStatus } = usePurchases();
-
 // In onPurchaseSuccess callback:
 await finishTransaction({ purchase, isConsumable: false });
-await refreshPremiumStatus(); // Update global premium state
+await refreshPremiumStatus();
 router.replace("/(tabs)");
 ```
 
@@ -1482,11 +1327,11 @@ router.replace("/(tabs)");
 
 - File: `src/context/ads-context.tsx`
 - Manages all 5 ad formats: App Open, Banner, Native, Interstitial, Rewarded
-- App Open fires on foreground return with 4-hour cooldown (skipped on first cold launch)
-- Interstitial: 3-minute cooldown, max 3/day — enforced automatically via `localStorage`
-- Rewarded: resolves `Promise<boolean>` — `true` if user earned the reward
-- All ads hidden for premium users via `shouldShowAds = !isPremium`
-- Always use `TestIds.*` in `__DEV__` to avoid policy violations
+- Ad unit IDs read from `ADMOB_UNITS` in `urls.ts`; `TestIds.*` used in `__DEV__`
+- App Open: 4-hour cooldown, skipped on first cold launch AND first-install launch
+- Interstitial: 5-min cooldown, max 3/day, only fires every 3rd quiz completion
+- Rewarded: always available — even premium users can use jokers/hints
+- All non-rewarded ads hidden when `isPremium || purchasesLoading`
 - `AdsProvider` must be nested **inside** `PurchasesProvider` in `_layout.tsx`
 
 ### ATT / Tracking Transparency (iOS Only)
@@ -2572,55 +2417,33 @@ export default function RootLayout() {
 
 ### Paywall Screen Implementation (REQUIRED)
 
-Full implementation of `src/app/paywall.tsx`:
+Full implementation of `src/app/paywall.tsx` (based on quiz-template-2026):
 
 ```tsx
 import { usePurchases } from "@/context/purchases-context";
 import { useThemeContext } from "@/context/theme-context";
 import { Analytics } from "@/lib/analytics";
+import { ANDROID_BASE_PLANS, IAP_SKUS_ANDROID, IAP_SKUS_IOS, PRIVACY_URL, TERMS_URL } from "@/constants/urls";
 import { MaterialIcons } from "@expo/vector-icons";
 import type { Purchase } from "expo-iap";
-import { useIAP } from "expo-iap";
+import { ErrorCode, useIAP } from "expo-iap";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+  ActivityIndicator, Alert, Animated, Platform, Pressable,
+  ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Replace with actual product IDs per platform
+// SKUs from urls.ts — never hardcode here
 const SKUS = {
-  monthly:
-    Platform.OS === "ios"
-      ? "com.company.appname.monthly"
-      : "appname_monthly_android",
-  yearly:
-    Platform.OS === "ios"
-      ? "com.company.appname.yearly"
-      : "appname_monthly_android", // Same subscription, different base plan
+  weekly:  Platform.OS === "ios" ? IAP_SKUS_IOS[0] : IAP_SKUS_ANDROID[0],
+  monthly: Platform.OS === "ios" ? IAP_SKUS_IOS[1] : IAP_SKUS_ANDROID[0],
+  yearly:  Platform.OS === "ios" ? IAP_SKUS_IOS[2] : IAP_SKUS_ANDROID[0],
 };
-
-// Android base plan IDs (used to find correct offer within subscription)
-const ANDROID_BASE_PLANS = {
-  monthly: "com-company-appname-monthly-android",
-  yearly: "com-company-appname-yearly",
-};
-
-// Replace with actual URLs
-const TERMS_URL = "https://example.com/terms.html";
-const PRIVACY_URL = "https://example.com/privacy.html";
 
 interface Feature {
   key: string;
@@ -2633,26 +2456,62 @@ const FEATURES: Feature[] = [
   { key: "paywall.feature3", icon: "cloud-off" },
 ];
 
+/**
+ * Parse numeric price from expo-iap product/offer.
+ * Handles Turkish/European locale formatting (e.g. "₺1.234,56" → 1234.56)
+ */
+function parseNumericPrice(product: any, offer: any): number | null {
+  if (Platform.OS !== "android" && product?.price != null) {
+    const n = parseFloat(String(product.price).replace(",", "."));
+    if (!isNaN(n) && n > 0) return n;
+  }
+  if (Platform.OS === "android" && offer?.displayPriceAmountMicros != null) {
+    return Number(offer.displayPriceAmountMicros) / 1_000_000;
+  }
+  const raw = Platform.OS === "android" ? offer?.displayPrice : product?.displayPrice;
+  if (raw) {
+    const stripped = String(raw).replace(/[^\d,.]/g, "");
+    if (stripped.includes(",")) {
+      const n = parseFloat(stripped.replace(/\./g, "").replace(",", "."));
+      if (!isNaN(n) && n > 0) return n;
+    }
+    const n = parseFloat(stripped);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return null;
+}
+
+function formatCurrencyAmount(amount: number, product: any, offer: any): string {
+  const currency = product?.currency ?? offer?.currency ?? "TRY";
+  try {
+    return new Intl.NumberFormat("tr-TR", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+  } catch { return amount.toFixed(2); }
+}
+
 export default function PaywallScreen() {
   const { t } = useTranslation();
   const { isDark } = useThemeContext();
-  const { refreshPremiumStatus, isPremium } = usePurchases();
+  const { refreshPremiumStatus, isPremium, subscriptions, productsLoaded } = usePurchases();
   const c = isDark ? darkColors : lightColors;
 
-  const [selectedPlan, setSelectedPlan] = useState<"monthly" | "yearly">(
-    "yearly",
-  );
+  const [selectedPlan, setSelectedPlan] = useState<"weekly" | "monthly" | "yearly">("yearly");
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
-  const {
-    connected,
-    subscriptions,
-    fetchProducts,
-    requestPurchase,
-    finishTransaction,
-    restorePurchases,
-  } = useIAP({
+  // Shimmer animation while products are loading
+  const shimmerAnim = useRef(new Animated.Value(0.5)).current;
+  useEffect(() => {
+    if (!productsLoaded) {
+      const loop = Animated.loop(Animated.sequence([
+        Animated.timing(shimmerAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(shimmerAnim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ]));
+      loop.start();
+      return () => loop.stop();
+    }
+  }, [productsLoaded]);
+
+  const { requestPurchase, finishTransaction, restorePurchases } = useIAP({
     onPurchaseSuccess: async (purchase: Purchase) => {
       try {
         await finishTransaction({ purchase, isConsumable: false });
@@ -2668,23 +2527,12 @@ export default function PaywallScreen() {
     },
     onPurchaseError: (error) => {
       setPurchasing(false);
-      const errorCode = (error as any)?.code;
-      if (errorCode !== "E_USER_CANCELLED") {
-        Analytics.logPurchaseFailed(
-          selectedPlan === "monthly" ? SKUS.monthly : SKUS.yearly,
-          errorCode,
-        );
+      if (error.code !== ErrorCode.UserCancelled) {
+        Analytics.logPurchaseFailed(SKUS[selectedPlan], error.code);
         Alert.alert(t("errors.generic"), t("errors.purchaseFailed"));
       }
     },
   });
-
-  useEffect(() => {
-    if (connected) {
-      const skusToFetch = [SKUS.monthly, SKUS.yearly];
-      fetchProducts({ skus: skusToFetch, type: "subs" });
-    }
-  }, [connected]);
 
   useEffect(() => {
     Analytics.logScreenView("PaywallScreen");
@@ -2692,50 +2540,66 @@ export default function PaywallScreen() {
   }, []);
 
   const handleClose = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/(tabs)");
-    }
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)");
   };
+
+  // Android: find correct base plan offer by basePlanId
+  const getAndroidOffer = (sku: string, basePlanId: string) => {
+    const sub = subscriptions?.find((s) => s.id === sku) ?? subscriptions?.[0];
+    return (
+      sub?.subscriptionOffers?.find((o: any) => o.basePlanIdAndroid === basePlanId && o.type !== "promotional") ??
+      sub?.subscriptionOffers?.find((o: any) => o.type !== "promotional") ??
+      sub?.subscriptionOffers?.[0]
+    );
+  };
+
+  const weeklyOffer   = Platform.OS === "android" ? getAndroidOffer(SKUS.weekly,  ANDROID_BASE_PLANS.weekly)  : null;
+  const monthlyOffer  = Platform.OS === "android" ? getAndroidOffer(SKUS.monthly, ANDROID_BASE_PLANS.monthly) : null;
+  const yearlyOffer   = Platform.OS === "android" ? getAndroidOffer(SKUS.yearly,  ANDROID_BASE_PLANS.yearly)  : null;
+  const weeklyProduct  = subscriptions?.find((p) => p.id === SKUS.weekly);
+  const monthlyProduct = subscriptions?.find((p) => p.id === SKUS.monthly);
+  const yearlyProduct  = subscriptions?.find((p) => p.id === SKUS.yearly);
+
+  const weeklyPrice  = Platform.OS === "android" ? weeklyOffer?.displayPrice  : weeklyProduct?.displayPrice;
+  const monthlyPrice = Platform.OS === "android" ? monthlyOffer?.displayPrice : monthlyProduct?.displayPrice;
+  const yearlyPrice  = Platform.OS === "android" ? yearlyOffer?.displayPrice  : yearlyProduct?.displayPrice;
+
+  const monthlyAmount = parseNumericPrice(monthlyProduct, monthlyOffer);
+  const yearlyAmount  = parseNumericPrice(yearlyProduct, yearlyOffer);
+
+  // Auto-calculate yearly discount vs monthly × 12
+  const yearlyDiscountPct = monthlyAmount && yearlyAmount && yearlyAmount < monthlyAmount * 12
+    ? Math.round((1 - yearlyAmount / (monthlyAmount * 12)) * 100) : null;
+  const yearlyBadgeText = yearlyDiscountPct ? `%${yearlyDiscountPct} Tasarruf` : t("paywall.yearlyBadge");
+
+  // Yearly per-week cost
+  const yearlyPerWeekDisplay = yearlyAmount
+    ? `~${formatCurrencyAmount(yearlyAmount / 52, yearlyProduct, yearlyOffer)}/hafta`
+    : t("paywall.yearlyPerWeek");
 
   const handleSubscribe = async () => {
     if (purchasing) return;
     setPurchasing(true);
-    const sku = selectedPlan === "monthly" ? SKUS.monthly : SKUS.yearly;
+    const sku = SKUS[selectedPlan];
     Analytics.logPurchaseInitiated(sku, selectedPlan);
     try {
       if (Platform.OS === "ios") {
         await requestPurchase({ request: { apple: { sku } }, type: "subs" });
       } else {
-        // Android: Use the correct base plan's offer token
-        const basePlanId =
-          selectedPlan === "monthly"
-            ? ANDROID_BASE_PLANS.monthly
-            : ANDROID_BASE_PLANS.yearly;
-        const offer = getAndroidOffer(basePlanId);
-
+        const basePlanId = ANDROID_BASE_PLANS[selectedPlan];
+        const offer = getAndroidOffer(sku, basePlanId);
         if (!offer?.offerTokenAndroid) {
           Alert.alert(t("errors.generic"), t("errors.purchaseFailed"));
           setPurchasing(false);
           return;
         }
-
         await requestPurchase({
-          request: {
-            google: {
-              skus: [sku],
-              subscriptionOffers: [
-                { sku, offerToken: offer.offerTokenAndroid },
-              ],
-            },
-          },
+          request: { google: { skus: [sku], subscriptionOffers: [{ sku, offerToken: offer.offerTokenAndroid }] } },
           type: "subs",
         });
       }
-    } catch {
-      setPurchasing(false);
-    }
+    } catch { setPurchasing(false); }
   };
 
   const handleRestore = async () => {
@@ -2745,258 +2609,111 @@ export default function PaywallScreen() {
     try {
       await restorePurchases();
       await refreshPremiumStatus();
-      if (isPremium) {
-        Analytics.logRestoreSuccess();
-        router.replace("/(tabs)");
-      } else {
-        Alert.alert("", t("errors.noActivePurchases"));
-      }
+      if (isPremium) { Analytics.logRestoreSuccess(); router.replace("/(tabs)"); }
+      else Alert.alert("", t("errors.noActivePurchases"));
     } catch (e) {
       Analytics.logRestoreFailed((e as any)?.code);
       Alert.alert(t("errors.generic"), t("errors.restoreFailed"));
-    } finally {
-      setRestoring(false);
-    }
+    } finally { setRestoring(false); }
   };
-
-  const monthlyProduct = subscriptions?.find((p) => p.id === SKUS.monthly);
-  const yearlyProduct = subscriptions?.find((p) => p.id === SKUS.yearly);
-
-  // Android: Get prices from subscriptionOffers by base plan ID
-  const getAndroidOffer = (basePlanId: string) => {
-    const sub = subscriptions?.[0];
-    // Find the base offer (without promotional discount) for this base plan
-    return sub?.subscriptionOffers?.find(
-      (o: any) =>
-        o.basePlanIdAndroid === basePlanId && o.type !== "promotional",
-    );
-  };
-
-  const monthlyOffer =
-    Platform.OS === "android"
-      ? getAndroidOffer(ANDROID_BASE_PLANS.monthly)
-      : null;
-  const yearlyOffer =
-    Platform.OS === "android"
-      ? getAndroidOffer(ANDROID_BASE_PLANS.yearly)
-      : null;
-
-  // Display prices - use offer prices on Android
-  const monthlyPrice =
-    Platform.OS === "android"
-      ? monthlyOffer?.displayPrice
-      : monthlyProduct?.displayPrice;
-  const yearlyPrice =
-    Platform.OS === "android"
-      ? yearlyOffer?.displayPrice
-      : yearlyProduct?.displayPrice;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
       <LinearGradient colors={c.bgGradient} style={StyleSheet.absoluteFill} />
-
       <SafeAreaView style={styles.safeArea}>
-        {/* Top bar */}
         <View style={styles.topBar}>
-          <TouchableOpacity
-            testID="close-button"
-            onPress={handleClose}
-            style={[styles.closeButton, { backgroundColor: c.closeBg }]}
-          >
+          <TouchableOpacity testID="close-button" onPress={handleClose} style={[styles.closeButton, { backgroundColor: c.closeBg }]}>
             <MaterialIcons name="close" size={18} color={c.closeIcon} />
           </TouchableOpacity>
         </View>
-
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-        >
-          {/* Hero icon */}
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} bounces={false}>
+          {/* Hero */}
           <View style={styles.heroWrap}>
-            <LinearGradient
-              colors={["#6C63FF", "#5650CC"]}
-              style={styles.heroGradient}
-            >
+            <LinearGradient colors={["#185996", "#185996"]} style={styles.heroGradient}>
               <MaterialIcons name="workspace-premium" size={40} color="#fff" />
             </LinearGradient>
-            <View
-              style={[styles.heroBadge, { backgroundColor: c.heroBadgeBg }]}
-            >
-              <MaterialIcons name="verified" size={14} color="#34D399" />
-            </View>
           </View>
-
-          <Text style={[styles.title, { color: c.text }]}>
-            {t("paywall.title")}
-          </Text>
-          <Text style={[styles.subtitle, { color: c.muted }]}>
-            {t("paywall.subtitle")}
-          </Text>
-
+          <Text style={[styles.title, { color: c.text }]}>{t("paywall.title")}</Text>
+          <Text style={[styles.subtitle, { color: c.muted }]}>{t("paywall.subtitle")}</Text>
           {/* Features */}
-          <View
-            style={[
-              styles.featuresCard,
-              { backgroundColor: c.cardBg, borderColor: c.cardBorder },
-            ]}
-          >
+          <View style={[styles.featuresCard, { backgroundColor: c.cardBg, borderColor: c.cardBorder }]}>
             {FEATURES.map(({ key, icon }, i) => (
               <View key={key}>
                 <View style={styles.featureRow}>
-                  <View
-                    style={[
-                      styles.featureIconWrap,
-                      { backgroundColor: c.featureIconBg },
-                    ]}
-                  >
+                  <View style={[styles.featureIconWrap, { backgroundColor: c.featureIconBg }]}>
                     <MaterialIcons name={icon} size={18} color="#A78BFA" />
                   </View>
-                  <Text style={[styles.featureText, { color: c.featureText }]}>
-                    {t(key)}
-                  </Text>
+                  <Text style={[styles.featureText, { color: c.featureText }]}>{t(key)}</Text>
                   <MaterialIcons name="check" size={16} color="#34D399" />
                 </View>
-                {i < FEATURES.length - 1 && (
-                  <View
-                    style={[
-                      styles.separator,
-                      { backgroundColor: c.cardBorder },
-                    ]}
-                  />
-                )}
+                {i < FEATURES.length - 1 && <View style={[styles.separator, { backgroundColor: c.cardBorder }]} />}
               </View>
             ))}
           </View>
-
-          {/* Plan selector */}
-          <View style={styles.plansRow}>
-            {/* Monthly */}
-            <TouchableOpacity
-              onPress={() => {
-                setSelectedPlan("monthly");
-                Analytics.logSubscriptionSelected("monthly", monthlyPrice);
-              }}
-              style={[
-                styles.planCard,
-                selectedPlan === "monthly"
-                  ? styles.planCardSelected
-                  : [
-                      styles.planCardIdle,
-                      {
-                        borderColor: c.planIdleBorder,
-                        backgroundColor: c.planIdleBg,
-                      },
-                    ],
-              ]}
-            >
-              {selectedPlan === "monthly" && <View style={styles.planDot} />}
-              <Text style={[styles.planLabel, { color: c.planLabel }]}>
-                {t("paywall.monthly")}
-              </Text>
-              <Text style={[styles.planPrice, { color: c.text }]}>
-                {monthlyPrice ?? t("paywall.monthlyPrice")}
-              </Text>
-            </TouchableOpacity>
-
-            {/* Yearly */}
-            <View style={styles.planCardWrap}>
-              <View style={styles.badgeWrap}>
-                <Text style={styles.badgeText}>{t("paywall.yearlyBadge")}</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  setSelectedPlan("yearly");
-                  Analytics.logSubscriptionSelected("yearly", yearlyPrice);
-                }}
-                style={[
-                  styles.planCard,
-                  selectedPlan === "yearly"
-                    ? styles.planCardSelected
-                    : [
-                        styles.planCardIdle,
-                        {
-                          borderColor: c.planIdleBorder,
-                          backgroundColor: c.planIdleBg,
-                        },
-                      ],
-                ]}
-              >
-                {selectedPlan === "yearly" && <View style={styles.planDot} />}
-                <Text style={[styles.planLabel, { color: c.planLabel }]}>
-                  {t("paywall.yearly")}
-                </Text>
-                <Text style={[styles.planPrice, { color: c.text }]}>
-                  {yearlyPrice ?? t("paywall.yearlyPrice")}
-                </Text>
-                <Text style={[styles.planPerWeek, { color: c.muted }]}>
-                  {t("paywall.yearlyPerWeek")}
-                </Text>
-              </TouchableOpacity>
+          {/* Plan selector — skeleton while loading */}
+          {!productsLoaded ? (
+            <View style={styles.plansRow}>
+              {[0, 1, 2].map((i) => (
+                <Animated.View key={i} style={[styles.planCardSkeleton, { backgroundColor: c.cardBg, opacity: shimmerAnim }]} />
+              ))}
             </View>
-          </View>
+          ) : (
+            <View style={styles.plansRow}>
+              {/* Weekly */}
+              <TouchableOpacity onPress={() => { setSelectedPlan("weekly"); Analytics.logSubscriptionSelected("weekly", weeklyPrice); }}
+                style={[styles.planCard, selectedPlan === "weekly" ? styles.planCardSelected : [styles.planCardIdle, { borderColor: c.planIdleBorder, backgroundColor: c.planIdleBg }]]}>
+                <Text style={[styles.planLabel, { color: c.planLabel }]}>{t("paywall.weekly")}</Text>
+                <Text style={[styles.planPrice, { color: c.text }]}>{weeklyPrice}</Text>
+              </TouchableOpacity>
+              {/* Monthly — "En Popüler" badge */}
+              <View style={styles.planCardWrap}>
+                <View style={[styles.badgeWrap, { backgroundColor: "#10B981" }]}>
+                  <Text style={styles.badgeText}>En Popüler</Text>
+                </View>
+                <TouchableOpacity onPress={() => { setSelectedPlan("monthly"); Analytics.logSubscriptionSelected("monthly", monthlyPrice); }}
+                  style={[styles.planCard, selectedPlan === "monthly" ? styles.planCardSelected : [styles.planCardIdle, { borderColor: c.planIdleBorder, backgroundColor: c.planIdleBg }]]}>
+                  <Text style={[styles.planLabel, { color: c.planLabel }]}>{t("paywall.monthly")}</Text>
+                  <Text style={[styles.planPrice, { color: c.text }]}>{monthlyPrice}</Text>
+                </TouchableOpacity>
+              </View>
+              {/* Yearly — discount badge */}
+              <View style={styles.planCardWrap}>
+                <View style={styles.badgeWrap}><Text style={styles.badgeText}>{yearlyBadgeText}</Text></View>
+                <TouchableOpacity onPress={() => { setSelectedPlan("yearly"); Analytics.logSubscriptionSelected("yearly", yearlyPrice); }}
+                  style={[styles.planCard, selectedPlan === "yearly" ? styles.planCardSelected : [styles.planCardIdle, { borderColor: c.planIdleBorder, backgroundColor: c.planIdleBg }]]}>
+                  <Text style={[styles.planLabel, { color: c.planLabel }]}>{t("paywall.yearly")}</Text>
+                  <Text style={[styles.planPrice, { color: c.text }]}>{yearlyPrice}</Text>
+                  <Text style={[styles.planPerWeek, { color: c.muted }]}>{yearlyPerWeekDisplay}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </ScrollView>
-
         {/* Sticky footer */}
         <View style={[styles.footer, { borderTopColor: c.footerBorder }]}>
-          <Pressable
-            testID="subscribe-button"
-            onPress={handleSubscribe}
-            disabled={purchasing}
-            style={styles.subscribeTouchable}
-          >
+          <Pressable testID="subscribe-button" onPress={handleSubscribe} disabled={purchasing || !productsLoaded} style={styles.subscribeTouchable}>
             <LinearGradient
-              colors={
-                purchasing ? ["#374151", "#374151"] : ["#6C63FF", "#5650CC"]
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
+              colors={purchasing || !productsLoaded ? ["#374151", "#374151"] : ["#185996", "#5650CC"]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
               style={styles.subscribeButton}
             >
-              {purchasing ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.subscribeButtonText}>
-                  {t("paywall.subscribe")}
-                </Text>
-              )}
+              {purchasing ? <ActivityIndicator color="#fff" /> : <Text style={styles.subscribeButtonText}>{t("paywall.subscribe")}</Text>}
             </LinearGradient>
           </Pressable>
-
           <Text style={[styles.autoRenewText, { color: c.muted }]}>
-            {t("paywall.autoRenew")}
+            {Platform.OS === "ios" ? t("paywall.autoRenew") : t("paywall.autoRenewAndroid")}
           </Text>
-
-          <TouchableOpacity
-            onPress={handleRestore}
-            disabled={restoring}
-            style={styles.restoreButton}
-          >
-            {restoring ? (
-              <ActivityIndicator size="small" color={c.muted} />
-            ) : (
-              <Text style={[styles.restoreText, { color: c.linkText }]}>
-                {t("paywall.restore")}
-              </Text>
-            )}
+          <TouchableOpacity onPress={handleRestore} disabled={restoring} style={styles.restoreButton}>
+            {restoring ? <ActivityIndicator size="small" color={c.muted} /> : <Text style={[styles.restoreText, { color: c.linkText }]}>{t("paywall.restore")}</Text>}
           </TouchableOpacity>
-
           <View style={styles.linksRow}>
-            <TouchableOpacity
-              onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
-            >
-              <Text style={[styles.linkText, { color: c.linkText }]}>
-                {t("paywall.terms")}
-              </Text>
+            <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}>
+              <Text style={[styles.linkText, { color: c.linkText }]}>{t("paywall.terms")}</Text>
             </TouchableOpacity>
             <Text style={[styles.linkDot, { color: c.muted }]}>·</Text>
-            <TouchableOpacity
-              onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
-            >
-              <Text style={[styles.linkText, { color: c.linkText }]}>
-                {t("paywall.privacy")}
-              </Text>
+            <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}>
+              <Text style={[styles.linkText, { color: c.linkText }]}>{t("paywall.privacy")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -3007,247 +2724,69 @@ export default function PaywallScreen() {
 
 const lightColors = {
   bgGradient: ["#F0EEFF", "#F9FAFB", "#EEF2FF"] as const,
-  text: "#111827",
-  muted: "#6B7280",
-  closeBg: "rgba(0,0,0,0.07)",
-  closeIcon: "#374151",
-  heroBadgeBg: "#F9FAFB",
-  cardBg: "rgba(0,0,0,0.04)",
-  cardBorder: "rgba(0,0,0,0.08)",
-  featureIconBg: "rgba(108,99,255,0.12)",
-  featureText: "#374151",
-  planIdleBorder: "rgba(0,0,0,0.12)",
-  planIdleBg: "rgba(0,0,0,0.03)",
-  planLabel: "#6B7280",
-  footerBorder: "rgba(0,0,0,0.07)",
-  linkText: "#6B7280",
+  text: "#111827", muted: "#6B7280", closeBg: "rgba(0,0,0,0.07)", closeIcon: "#374151",
+  heroBadgeBg: "#F9FAFB", cardBg: "rgba(0,0,0,0.04)", cardBorder: "rgba(0,0,0,0.08)",
+  featureIconBg: "rgba(108,99,255,0.12)", featureText: "#374151",
+  planIdleBorder: "rgba(0,0,0,0.12)", planIdleBg: "rgba(0,0,0,0.03)", planLabel: "#6B7280",
+  footerBorder: "rgba(0,0,0,0.07)", linkText: "#6B7280",
 };
-
 const darkColors = {
   bgGradient: ["#0A0F1E", "#111827", "#0F172A"] as const,
-  text: "#FFFFFF",
-  muted: "rgba(255,255,255,0.4)",
-  closeBg: "rgba(255,255,255,0.1)",
-  closeIcon: "rgba(255,255,255,0.7)",
-  heroBadgeBg: "#0F172A",
-  cardBg: "rgba(255,255,255,0.05)",
-  cardBorder: "rgba(255,255,255,0.08)",
-  featureIconBg: "rgba(108,99,255,0.2)",
-  featureText: "rgba(255,255,255,0.85)",
-  planIdleBorder: "rgba(255,255,255,0.12)",
-  planIdleBg: "rgba(255,255,255,0.04)",
-  planLabel: "rgba(255,255,255,0.55)",
-  footerBorder: "rgba(255,255,255,0.07)",
-  linkText: "rgba(255,255,255,0.4)",
+  text: "#FFFFFF", muted: "rgba(255,255,255,0.4)", closeBg: "rgba(255,255,255,0.1)", closeIcon: "rgba(255,255,255,0.7)",
+  heroBadgeBg: "#0F172A", cardBg: "rgba(255,255,255,0.05)", cardBorder: "rgba(255,255,255,0.08)",
+  featureIconBg: "rgba(108,99,255,0.2)", featureText: "rgba(255,255,255,0.85)",
+  planIdleBorder: "rgba(255,255,255,0.12)", planIdleBg: "rgba(255,255,255,0.04)", planLabel: "rgba(255,255,255,0.55)",
+  footerBorder: "rgba(255,255,255,0.07)", linkText: "rgba(255,255,255,0.4)",
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  safeArea: { flex: 1 },
-  topBar: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  scroll: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-    alignItems: "center",
-  },
-  heroWrap: {
-    marginTop: 16,
-    marginBottom: 24,
-    alignItems: "center",
-  },
-  heroGradient: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroBadge: {
-    position: "absolute",
-    bottom: -4,
-    right: -4,
-    borderRadius: 10,
-    padding: 2,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 24,
-  },
-  featuresCard: {
-    width: "100%",
-    borderWidth: 1,
-    borderRadius: 14,
-    marginBottom: 20,
-    overflow: "hidden",
-  },
-  featureRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  featureIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  featureText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    marginHorizontal: 16,
-  },
-  plansRow: {
-    flexDirection: "row",
-    width: "100%",
-    gap: 12,
-  },
-  planCardWrap: {
-    flex: 1,
-    position: "relative",
-    marginTop: 12,
-  },
-  badgeWrap: {
-    position: "absolute",
-    top: -12,
-    alignSelf: "center",
-    backgroundColor: "#F59E0B",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    zIndex: 1,
-  },
-  badgeText: {
-    color: "#000",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  planCard: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-  },
-  planCardSelected: {
-    borderWidth: 2,
-    borderColor: "#6C63FF",
-    backgroundColor: "rgba(108,99,255,0.12)",
-  },
-  planCardIdle: {
-    borderWidth: 1,
-  },
-  planDot: {
-    position: "absolute",
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#6C63FF",
-  },
-  planLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  planPrice: {
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  planPerWeek: {
-    fontSize: 11,
-    textAlign: "center",
-  },
-  footer: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 24,
-    paddingBottom: 20,
-    paddingTop: 16,
-  },
-  subscribeTouchable: {
-    borderRadius: 14,
-    overflow: "hidden",
-    marginBottom: 10,
-  },
-  subscribeButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-  },
-  subscribeButtonText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  autoRenewText: {
-    fontSize: 11,
-    textAlign: "center",
-    marginBottom: 6,
-  },
-  restoreButton: {
-    alignItems: "center",
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  restoreText: {
-    fontSize: 13,
-    textDecorationLine: "underline",
-  },
-  linksRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  linkText: {
-    fontSize: 13,
-  },
-  linkDot: {
-    fontSize: 14,
-  },
+  container: { flex: 1 }, safeArea: { flex: 1 },
+  topBar: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  closeButton: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  scroll: { paddingHorizontal: 24, paddingBottom: 24, alignItems: "center" },
+  heroWrap: { marginTop: 16, marginBottom: 24, alignItems: "center" },
+  heroGradient: { width: 80, height: 80, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  title: { fontSize: 28, fontWeight: "700", textAlign: "center", marginBottom: 8 },
+  subtitle: { fontSize: 16, textAlign: "center", marginBottom: 24 },
+  featuresCard: { width: "100%", borderWidth: 1, borderRadius: 14, marginBottom: 20, overflow: "hidden" },
+  featureRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  featureIconWrap: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  featureText: { flex: 1, fontSize: 14, fontWeight: "500" },
+  separator: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
+  plansRow: { flexDirection: "row", width: "100%", gap: 12 },
+  planCardSkeleton: { flex: 1, height: 110, borderRadius: 12, marginTop: 12 },
+  planCardWrap: { flex: 1, position: "relative", marginTop: 12 },
+  badgeWrap: { position: "absolute", top: -12, alignSelf: "center", backgroundColor: "#F59E0B", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 3, zIndex: 1 },
+  badgeText: { color: "#000", fontSize: 11, fontWeight: "800" },
+  planCard: { flex: 1, alignItems: "center", paddingVertical: 16, paddingHorizontal: 8, borderRadius: 12 },
+  planCardSelected: { borderWidth: 2, borderColor: "#185996", backgroundColor: "rgba(24,89,150,0.12)" },
+  planCardIdle: { borderWidth: 1 },
+  planLabel: { fontSize: 11, fontWeight: "600", textTransform: "uppercase", letterSpacing: 1 },
+  planPrice: { fontSize: 15, fontWeight: "700", textAlign: "center", marginTop: 4 },
+  planPerWeek: { fontSize: 11, textAlign: "center" },
+  footer: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 24, paddingBottom: 20, paddingTop: 16 },
+  subscribeTouchable: { borderRadius: 14, overflow: "hidden", marginBottom: 10 },
+  subscribeButton: { alignItems: "center", justifyContent: "center", paddingVertical: 16 },
+  subscribeButtonText: { color: "#FFFFFF", fontSize: 18, fontWeight: "700" },
+  autoRenewText: { fontSize: 11, textAlign: "center", marginBottom: 6 },
+  restoreButton: { alignItems: "center", paddingVertical: 8, marginBottom: 8 },
+  restoreText: { fontSize: 13, textDecorationLine: "underline" },
+  linksRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  linkText: { fontSize: 13 }, linkDot: { fontSize: 14 },
 });
 ```
 
 > **Notes:**
 >
-> - Replace `SKUS` with the app's actual App Store / Play Store product IDs (iOS uses separate SKUs per plan, Android may use a single subscription with multiple base plans)
-> - Replace `ANDROID_BASE_PLANS` with the actual base plan IDs from Google Play Console
-> - Replace `TERMS_URL` and `PRIVACY_URL` with actual links
-> - Default selected plan is **yearly** — adjust `FEATURES` array per app
-> - On **Android**, prices are extracted from `subscriptionOffers` using `basePlanIdAndroid` since a single subscription can have multiple base plans (monthly/yearly)
-> - On **iOS**, `displayPrice` comes directly from the subscription product
-> - `Analytics` integration tracks: screen views, paywall views, subscription selection, purchase initiated/success/failed, restore initiated/success/failed
-> - Theme-aware: uses `useThemeContext()` for light/dark mode with separate color palettes
-> - Add i18n keys: `paywall.title`, `paywall.subtitle`, `paywall.monthly`, `paywall.yearly`, `paywall.monthlyPrice`, `paywall.yearlyPrice`, `paywall.yearlyBadge`, `paywall.yearlyPerWeek`, `paywall.subscribe`, `paywall.autoRenew`, `paywall.restore`, `paywall.terms`, `paywall.privacy`, `paywall.feature1-3`, `errors.generic`, `errors.purchaseFailed`, `errors.noActivePurchases`, `errors.restoreFailed`
+> - `SKUS` ve `ANDROID_BASE_PLANS` tamamen `urls.ts`'den gelir — burada hardcode değer yoktur
+> - **3 plan**: weekly / monthly / yearly; Android'de hepsi aynı subscription ID'yi paylaşır, base plan ile ayrışır
+> - `productsLoaded` false iken shimmer skeleton gösterilir
+> - `parseNumericPrice` + `formatCurrencyAmount` → Türkçe/Avrupa locale fiyatlarını doğru işler
+> - Yıllık tasarruf yüzdesi ve haftalık maliyet otomatik hesaplanır
+> - Intro price (ücretsiz deneme) varsa subscribe butonu metni değişir
+> - `ErrorCode.UserCancelled` ise Alert gösterilmez
+> - `autoRenewAndroid` — iOS ve Android için ayrı metinler
+> - i18n keys: `paywall.title`, `paywall.subtitle`, `paywall.weekly`, `paywall.monthly`, `paywall.yearly`, `paywall.yearlyBadge`, `paywall.yearlyPerWeek`, `paywall.subscribe`, `paywall.autoRenew`, `paywall.autoRenewAndroid`, `paywall.restore`, `paywall.terms`, `paywall.privacy`, `paywall.feature1-3`, `errors.generic`, `errors.purchaseFailed`, `errors.noActivePurchases`, `errors.restoreFailed`
 
 ### Settings Screen Options (REQUIRED)
 
